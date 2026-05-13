@@ -38,7 +38,6 @@ export default function Settings() {
 
   async function connectHiggsfield() {
     setHfLoading(true)
-    fireReferralOnce()
     try {
       await startHiggsfieldOAuthPopup()
       setHfConnected(true)

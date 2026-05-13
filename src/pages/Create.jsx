@@ -791,7 +791,6 @@ function Step5({ data, onFinish, onReset, hfConnected, onConnected }) {
 
   async function doConnect() {
     setConnectingHF(true)
-    fireReferralOnce()
     try {
       await startHiggsfieldOAuthPopup()
       onConnected?.()
@@ -962,7 +961,6 @@ export default function Create() {
   }
 
   async function connectFromBanner() {
-    fireReferralOnce()
     try {
       await startHiggsfieldOAuthPopup()
       setHfConnected(true)
