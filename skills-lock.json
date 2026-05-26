@@ -24,6 +24,12 @@
       "sourceType": "github",
       "skillPath": "higgsfield-soul-id/SKILL.md",
       "computedHash": "7cfc9540f5890dac0035f430c820a7db13c14796b2a8d42edb75f373e9e418c1"
+    },
+    "higgsfield-content-factory": {
+      "source": "local",
+      "sourceType": "local",
+      "skillPath": ".agents/skills/higgsfield-content-factory/SKILL.md",
+      "computedHash": "11bfca222c1e64c976e3d5ea7fc323741f9652bad888d12cb9ad97d0a8cd6179"
     }
   }
 }

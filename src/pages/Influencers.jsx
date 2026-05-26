@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect, useMemo } from 'react'
+import { createPortal } from 'react-dom'
 import { useLocation, useNavigate } from 'react-router-dom'
-import { useInfluencers, generateId } from '../store'
+import { useInfluencers, useBrandDeals, generateId } from '../store'
 import ImageGrid from '../components/ImageGrid'
 import MasonryGrid from '../components/MasonryGrid'
 import Lightbox from '../components/Lightbox'
@@ -9,6 +10,10 @@ import { generateSingleImage, generateThreeImages, generateVideo, initSession, p
 import { buildThreeVariationPrompts } from '../utils/systemPrompt'
 import { gColor, pLabel } from '../utils/influencerUtils'
 import { useTheme } from '../context/theme'
+import { isHFConnected } from '../utils/higgsfieldAuth'
+import { buildCharSheetPrompt, buildCharSheetPromptWithClaude } from '../utils/charSheetPrompt'
+import PhotoStudioPanel from './PhotoStudio'
+import WardrobeDrawer from '../components/WardrobeDrawer'
 
 function useMobile() {
   const [m, setM] = useState(() => window.innerWidth < 768)
@@ -202,12 +207,14 @@ function CtxMenu({ x, y, items, onClose }) {
 
 // ─────────────────────────────────────────────
 // Hero banner — clean profile card
-function HeroBanner({ influencer, onDelete, pct }) {
+function HeroBanner({ influencer, onDelete, pct, onUpdate }) {
   const ac = accent(influencer)
   const gc = gColor(influencer.gender)
   const r = 33, c = 2*Math.PI*r, off = c*(1-pct/100)
   const ringColor = pct>=80?'#34C759':pct>=50?'#F97316':'#0071E3'
   const isMobile = useMobile()
+  const [editingTag, setEditingTag] = useState(false)
+  const [tagDraft, setTagDraft] = useState(influencer.tag || '')
 
   return (
     <div style={{
@@ -250,8 +257,31 @@ function HeroBanner({ influencer, onDelete, pct }) {
 
         {/* Name + meta */}
         <div style={{flex:1,minWidth:0}}>
-          <div style={{fontSize:22,fontWeight:800,letterSpacing:'-0.5px',color:'var(--text-primary)',marginBottom:7,lineHeight:1.2}}>
-            {influencer.name}
+          <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:5,flexWrap:'wrap'}}>
+            <div style={{fontSize:22,fontWeight:800,letterSpacing:'-0.5px',color:'var(--text-primary)',lineHeight:1.2}}>
+              {influencer.name}
+            </div>
+            {editingTag ? (
+              <input
+                autoFocus
+                value={tagDraft}
+                onChange={e=>setTagDraft(e.target.value)}
+                onBlur={()=>{setEditingTag(false);onUpdate({tag:tagDraft.trim()})}}
+                onKeyDown={e=>{if(e.key==='Enter'||e.key==='Escape'){setEditingTag(false);onUpdate({tag:tagDraft.trim()})}}}
+                placeholder="Add title…"
+                style={{fontSize:12,fontWeight:600,padding:'3px 10px',borderRadius:20,border:'1.5px solid rgba(139,92,246,0.5)',background:'rgba(139,92,246,0.07)',color:'#8B5CF6',outline:'none',fontFamily:'inherit',width:140}}
+              />
+            ) : (
+              <button
+                onClick={()=>{setTagDraft(influencer.tag||'');setEditingTag(true)}}
+                style={{fontSize:12,fontWeight:600,padding:'3px 10px',borderRadius:20,
+                  border:`1.5px solid ${influencer.tag?'rgba(139,92,246,0.35)':'var(--border)'}`,
+                  background:influencer.tag?'rgba(139,92,246,0.07)':'transparent',
+                  color:influencer.tag?'#8B5CF6':'var(--text-tertiary)',
+                  cursor:'pointer',fontFamily:'inherit',transition:'all 0.15s',
+                }}
+              >{influencer.tag || '+ Add title'}</button>
+            )}
           </div>
           <div style={{display:'flex',alignItems:'center',gap:6,flexWrap:'wrap'}}>
             {influencer.gender&&(
@@ -293,7 +323,7 @@ function HeroBanner({ influencer, onDelete, pct }) {
 
 // ─────────────────────────────────────────────
 // Character sheet slot with inline generation
-function GenLoadingOverlay({ elapsed, onCancel }) {
+function GenLoadingOverlay({ elapsed, onCancel, maxLabel = '5 min' }) {
   const m = Math.floor(elapsed / 60)
   const s = elapsed % 60
   const timeStr = `${m}:${s.toString().padStart(2, '0')}`
@@ -311,7 +341,7 @@ function GenLoadingOverlay({ elapsed, onCancel }) {
       }}/>
       <div style={{fontSize:12,fontWeight:700,color:'rgba(255,255,255,0.9)',letterSpacing:'0.2px'}}>Generating…</div>
       <div style={{fontSize:10,color:'rgba(255,255,255,0.38)',textAlign:'center',lineHeight:1.5}}>
-        Up to 5 min<br/>
+        Up to {maxLabel}<br/>
         <span style={{color:'rgba(255,255,255,0.55)',fontVariantNumeric:'tabular-nums'}}>{timeStr}</span>
       </div>
       {onCancel && (
@@ -349,7 +379,7 @@ function CharacterSheetSlot({ influencer, onSave, onLightbox }) {
   // Resume any in-progress job that survived a page reload
   useEffect(() => {
     const job = getPendingGens().find(j => j.influencerId === influencer.id && j.slot === 'characterSheetImage')
-    if (!job) return
+    if (!job) { setLoading(false); return }
     const secondsIn = Math.floor((Date.now() - job.startedAt) / 1000)
     setElapsed(secondsIn)
     setLoading(true)
@@ -484,8 +514,8 @@ function CharacterSheetSlot({ influencer, onSave, onLightbox }) {
       {/* Inline panel */}
       {open && (
         <div style={{marginTop:8,padding:'12px 14px',borderRadius:10,background:'var(--surface)',border:'1.5px solid var(--border)',display:'flex',flexDirection:'column',gap:10}}>
-          {/* Ratio picker */}
-          <div>
+          {/* Ratio picker — hidden during generation */}
+          {!loading && <div>
             <div style={{fontSize:10,fontWeight:700,color:'var(--text-tertiary)',textTransform:'uppercase',letterSpacing:'0.6px',marginBottom:6}}>Aspect Ratio</div>
             <div style={{display:'flex',gap:6}}>
               {SHEET_RATIOS.map(r=>(
@@ -501,7 +531,7 @@ function CharacterSheetSlot({ influencer, onSave, onLightbox }) {
                 </button>
               ))}
             </div>
-          </div>
+          </div>}
 
           {err && <div style={{fontSize:11,color:'#FF3B30',lineHeight:1.4}}>{err}</div>}
 
@@ -540,7 +570,7 @@ function CloseUpSlot({ influencer, imageKey, label, onSave, onLightbox, promptFn
   // Resume any in-progress job that survived a page reload
   useEffect(() => {
     const job = getPendingGens().find(j => j.influencerId === influencer.id && j.slot === imageKey)
-    if (!job) return
+    if (!job) { setLoading(false); return }
     const secondsIn = Math.floor((Date.now() - job.startedAt) / 1000)
     setElapsed(secondsIn)
     setLoading(true)
@@ -757,7 +787,7 @@ function MainImageSlot({ influencer, onChange, onLightbox }) {
         onMouseEnter={() => setHovered(true)}
         onMouseLeave={() => setHovered(false)}
       >
-        {loading && <GenLoadingOverlay elapsed={elapsed} />}
+        {loading && <GenLoadingOverlay elapsed={elapsed} maxLabel="5 min 30 sec" />}
         {value ? (
           <>
             <img src={value} alt="Main image" onClick={onLightbox}
@@ -855,9 +885,8 @@ function FTA({ value, onChange, placeholder, rows=3 }) {
 // ─────────────────────────────────────────────
 // Gender buttons
 const GM = {
-  Female:       {icon:'♀',color:'#EC4899',bg:'rgba(236,72,153,0.08)',border:'#EC4899'},
-  Male:         {icon:'♂',color:'#3B82F6',bg:'rgba(59,130,246,0.08)',border:'#3B82F6'},
-  'Non-binary': {icon:'⚧',color:'#8B5CF6',bg:'rgba(139,92,246,0.08)',border:'#8B5CF6'},
+  Female: {icon:'♀',color:'#EC4899',bg:'rgba(236,72,153,0.08)',border:'#EC4899'},
+  Male:   {icon:'♂',color:'#3B82F6',bg:'rgba(59,130,246,0.08)',border:'#3B82F6'},
 }
 function GenderButtons({ value, onChange }) {
   return (
@@ -886,7 +915,6 @@ function GenderButtons({ value, onChange }) {
 const DEFAULT_PALETTES = {
   Female:['#F9A8D4','#FBCFE8','#E879F9','#BE185D'],
   Male:['#93C5FD','#BFDBFE','#3B82F6','#1E3A8A'],
-  'Non-binary':['#C4B5FD','#DDD6FE','#7C3AED','#4C1D95'],
 }
 function ColorPalette({ palette=[], onChange, gender }) {
   const defs = DEFAULT_PALETTES[gender]||['#E5E7EB','#D1D5DB','#9CA3AF','#6B7280']
@@ -960,6 +988,8 @@ function SaveScriptModal({ onSave, onClose }) {
 function ScriptsSection({ scripts=[], influencerPrompt='', onChange, initialExpanded=null }) {
   const [selectedId, setSelectedId] = useState(initialExpanded)
   const [copied, setCopied] = useState(null)
+  const [vidLightbox, setVidLightbox] = useState(null)
+  const [hoveredRef, setHoveredRef] = useState(null) // { ref, rect }
   const drawerRef = useRef()
   const listRef = useRef()
 
@@ -999,11 +1029,16 @@ function ScriptsSection({ scripts=[], influencerPrompt='', onChange, initialExpa
     function handleClick(e) {
       if (drawerRef.current?.contains(e.target)) return
       if (listRef.current?.contains(e.target)) return
+      // Don't close drawer when clicking inside a portal (lightbox, etc.)
+      if (e.target.closest('[data-portal]')) return
       setSelectedId(null)
     }
     document.addEventListener('mousedown', handleClick)
     return () => document.removeEventListener('mousedown', handleClick)
   }, [selectedId])
+
+  // Clear lightbox whenever selected script changes
+  useEffect(() => { setVidLightbox(null) }, [selectedId])
 
   function add() {
     const s = { id:generateId(), title:`Script ${scripts.length+1}`, status:'Unposted', prompt:'', script:'', videoUrls:[], postedUrl:'', createdAt: Date.now() }
@@ -1058,7 +1093,7 @@ function ScriptsSection({ scripts=[], influencerPrompt='', onChange, initialExpa
         <div style={{textAlign:'center',padding:'52px 0',color:'var(--text-tertiary)'}}>
           <div style={{fontSize:36,marginBottom:10,opacity:.2}}>🎬</div>
           <div style={{fontSize:14,fontWeight:600,color:'var(--text-secondary)',marginBottom:6}}>No scripts yet</div>
-          <div style={{fontSize:13}}>Save videos from Content Studio to track them here.</div>
+          <div style={{fontSize:13}}>Save videos from the Videos tab to track them here.</div>
         </div>
       )}
 
@@ -1205,20 +1240,39 @@ function ScriptsSection({ scripts=[], influencerPrompt='', onChange, initialExpa
             {/* Scrollable body */}
             <div style={{flex:1,overflowY:'auto',padding:'20px',display:'flex',flexDirection:'column',gap:22}}>
 
-              {/* Meta chips */}
-              {s.meta && (
-                <div style={{display:'flex',flexWrap:'wrap',gap:5}}>
-                  {[
-                    s.meta.camera && `📷 ${s.meta.camera}`,
-                    s.meta.vibe && `✨ ${s.meta.vibe}`,
-                    s.meta.duration && `${s.meta.duration}s`,
-                    s.meta.aspect,
-                    s.meta.shotMode==='oner'?'1-shot':s.meta.shotMode==='multi'?'Multi-shot':null,
-                    s.meta.envKey||null,
-                    s.meta.hasProduct?'Product':null,
-                  ].filter(Boolean).map(tag=>(
-                    <span key={tag} style={{fontSize:11,fontWeight:600,padding:'4px 10px',borderRadius:20,background:'var(--bg)',color:'var(--text-secondary)',border:'1px solid var(--border)'}}>{tag}</span>
-                  ))}
+              {/* Videos — small strip thumbs */}
+              {urls.filter(Boolean).length > 0 && (
+                <div>
+                  <div style={{fontSize:11,fontWeight:700,color:'var(--text-tertiary)',textTransform:'uppercase',letterSpacing:'0.5px',marginBottom:10}}>
+                    Videos · {urls.filter(Boolean).length}
+                  </div>
+                  <div style={{display:'flex',flexWrap:'wrap',gap:8}}>
+                    {urls.filter(Boolean).map((url,vi)=>(
+                      <div key={url+vi} style={{width:60,borderRadius:9,overflow:'hidden',flexShrink:0,border:'1.5px solid var(--border)'}}>
+                        <div style={{position:'relative',cursor:'pointer'}} onClick={()=>setVidLightbox(url)}>
+                          <video src={url} preload="metadata" muted playsInline style={{width:'100%',height:90,objectFit:'cover',display:'block',pointerEvents:'none'}}/>
+                          <div style={{position:'absolute',inset:0,background:'rgba(0,0,0,0.18)',display:'flex',alignItems:'center',justifyContent:'center'}}>
+                            <div style={{width:22,height:22,borderRadius:'50%',background:'linear-gradient(135deg,#EC4899,#8B5CF6)',display:'flex',alignItems:'center',justifyContent:'center',fontSize:9,paddingLeft:2,color:'#fff',boxShadow:'0 2px 8px rgba(139,92,246,0.45)'}}>▶</div>
+                          </div>
+                        </div>
+                        <div style={{display:'flex',gap:1,background:'var(--bg-tertiary)',padding:'3px'}}>
+                          <button
+                            title="Download"
+                            onClick={async()=>{
+                              try{const r=await fetch(url);const b=await r.blob();const a=document.createElement('a');a.href=URL.createObjectURL(b);a.download=`video-${vi+1}.mp4`;a.click()}
+                              catch{window.open(url,'_blank')}
+                            }}
+                            style={{flex:1,padding:'3px 0',borderRadius:5,fontSize:11,border:'none',cursor:'pointer',background:'rgba(139,92,246,0.12)',color:'#8B5CF6',fontFamily:'inherit'}}
+                          >↓</button>
+                          <button
+                            title="Remove"
+                            onClick={()=>upd(s.id,'videoUrls',(s.videoUrls||[]).filter(u=>u!==url))}
+                            style={{flex:1,padding:'3px 0',borderRadius:5,fontSize:11,border:'none',cursor:'pointer',background:'rgba(255,59,48,0.1)',color:'#FF3B30',fontFamily:'inherit'}}
+                          >×</button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
                 </div>
               )}
 
@@ -1232,6 +1286,49 @@ function ScriptsSection({ scripts=[], influencerPrompt='', onChange, initialExpa
                   placeholder="What does the influencer say?"
                   rows={5} style={{...fieldStyle,resize:'vertical'}}/>
               </div>
+
+              {/* Image References */}
+              {(s.refs||[]).length > 0 && (
+                <div>
+                  <div style={{fontSize:11,fontWeight:700,color:'var(--text-tertiary)',textTransform:'uppercase',letterSpacing:'0.5px',marginBottom:10}}>References</div>
+                  <div style={{display:'flex',flexWrap:'wrap',gap:10}}>
+                    {(s.refs||[]).map((ref,ri)=>(
+                      <div key={ri} style={{display:'flex',flexDirection:'column',alignItems:'center',gap:4}}
+                        onMouseEnter={e=>{const r=e.currentTarget.getBoundingClientRect();setHoveredRef({ref,rect:r})}}
+                        onMouseLeave={()=>setHoveredRef(null)}>
+                        <div style={{width:54,height:70,borderRadius:9,overflow:'hidden',border:`1.5px solid ${hoveredRef?.ref===ref?'var(--accent,#8B5CF6)':'var(--border)'}`,background:'var(--bg-tertiary)',transition:'border-color 0.15s',cursor:'pointer'}}>
+                          <img src={ref.url} alt={ref.label} style={{width:'100%',height:'100%',objectFit:'cover',objectPosition:'top',display:'block'}}/>
+                        </div>
+                        <span style={{fontSize:9,fontWeight:600,color:'var(--text-tertiary)',textAlign:'center',maxWidth:54,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{ref.label}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Settings */}
+              {s.meta && (
+                <div>
+                  <div style={{fontSize:11,fontWeight:700,color:'var(--text-tertiary)',textTransform:'uppercase',letterSpacing:'0.5px',marginBottom:10}}>Settings</div>
+                  <div style={{display:'flex',flexDirection:'column',gap:7}}>
+                    {[
+                      ['Location',  s.meta.environment || s.meta.envKey],
+                      ['Camera',    s.meta.camera],
+                      ['Vibe',      s.meta.vibe],
+                      ['Duration',  s.meta.duration && `${s.meta.duration}s`],
+                      ['Format',    [s.meta.aspect, s.meta.shotMode==='oner'?'1-shot':s.meta.shotMode==='multi'?'Multi-shot':null].filter(Boolean).join(' · ')],
+                      ['Wardrobe',  s.meta.wardrobeName],
+                      ['Voice',     s.meta.voiceLabel],
+                      ['Notes',     s.meta.additionalNotes],
+                    ].filter(([,v])=>v).map(([label,value])=>(
+                      <div key={label} style={{display:'flex',gap:10,alignItems:'flex-start'}}>
+                        <span style={{fontSize:10,fontWeight:700,color:'var(--text-tertiary)',textTransform:'uppercase',letterSpacing:'0.5px',minWidth:58,flexShrink:0,paddingTop:1}}>{label}</span>
+                        <span style={{fontSize:12,color:'var(--text-primary)',lineHeight:1.4}}>{value}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
 
               {/* Generation Prompt */}
               <div>
@@ -1249,25 +1346,6 @@ function ScriptsSection({ scripts=[], influencerPrompt='', onChange, initialExpa
                   rows={8} style={{...fieldStyle,resize:'vertical',fontSize:12,lineHeight:1.65}}/>
               </div>
 
-              {/* Video Links */}
-              <div>
-                <div style={{fontSize:11,fontWeight:700,color:'var(--text-tertiary)',textTransform:'uppercase',letterSpacing:'0.5px',marginBottom:8}}>Video Links</div>
-                <div style={{display:'flex',flexDirection:'column',gap:7}}>
-                  {[0,1,2].map(vi=>{
-                    const u=urls[vi]||''
-                    return (
-                      <div key={vi} style={{display:'flex',gap:7,alignItems:'center'}}>
-                        <span style={{fontSize:11,fontWeight:600,color:'var(--text-tertiary)',width:16,textAlign:'center',flexShrink:0}}>{vi+1}</span>
-                        <input value={u} onChange={e=>setUrl(s,vi,e.target.value)}
-                          placeholder="Paste share link…"
-                          style={{...fieldStyle,padding:'9px 12px',fontSize:12,flex:1}}/>
-                        {u&&<a href={u} target="_blank" rel="noreferrer" style={{width:36,height:36,borderRadius:9,fontSize:13,background:'var(--bg)',color:'var(--text-secondary)',textDecoration:'none',flexShrink:0,border:'1.5px solid var(--border)',display:'flex',alignItems:'center',justifyContent:'center'}}>↗</a>}
-                      </div>
-                    )
-                  })}
-                </div>
-              </div>
-
               {/* Posted URL */}
               <div>
                 <div style={{fontSize:11,fontWeight:700,color:'var(--text-tertiary)',textTransform:'uppercase',letterSpacing:'0.5px',marginBottom:8}}>Posted At</div>
@@ -1282,6 +1360,41 @@ function ScriptsSection({ scripts=[], influencerPrompt='', onChange, initialExpa
               </div>
 
             </div>
+
+            {/* Reference image hover popup */}
+            {hoveredRef && createPortal(
+              <div data-portal style={{
+                position:'fixed',
+                left: hoveredRef.rect.left + hoveredRef.rect.width/2,
+                top: hoveredRef.rect.top - 12,
+                transform:'translate(-50%,-100%)',
+                width:220,
+                background:'var(--surface)',
+                borderRadius:12,
+                boxShadow:'0 12px 40px rgba(0,0,0,0.32)',
+                border:'1px solid var(--border)',
+                overflow:'hidden',
+                zIndex:9000,
+                pointerEvents:'none',
+                animation:'refPopIn 0.12s ease',
+              }}>
+                <div style={{width:'100%',background:'var(--bg-tertiary)',display:'flex',alignItems:'center',justifyContent:'center'}}>
+                  <img src={hoveredRef.ref.url} alt={hoveredRef.ref.label} style={{maxWidth:'100%',maxHeight:260,display:'block',objectFit:'contain'}}/>
+                </div>
+                <div style={{padding:'6px 10px',fontSize:11,fontWeight:600,color:'var(--text-secondary)',borderTop:'1px solid var(--border)'}}>{hoveredRef.ref.label}</div>
+              </div>,
+              document.body
+            )}
+            <style>{`@keyframes refPopIn{from{opacity:0;transform:translate(-50%,-94%)}to{opacity:1;transform:translate(-50%,-100%)}}`}</style>
+
+            {/* Video lightbox */}
+            {vidLightbox && createPortal(
+              <div data-portal onClick={()=>setVidLightbox(null)} onMouseDown={e=>e.stopPropagation()} style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.93)',zIndex:9999,display:'flex',alignItems:'center',justifyContent:'center'}}>
+                <video src={vidLightbox} controls autoPlay playsInline onClick={e=>e.stopPropagation()} style={{maxWidth:'90vw',maxHeight:'90vh',borderRadius:14,display:'block'}}/>
+                <button onClick={()=>setVidLightbox(null)} style={{position:'absolute',top:20,right:20,width:36,height:36,borderRadius:'50%',background:'rgba(255,255,255,0.14)',color:'#fff',border:'none',cursor:'pointer',fontSize:18,display:'flex',alignItems:'center',justifyContent:'center'}}>✕</button>
+              </div>,
+              document.body
+            )}
           </div>
           </div>
         )
@@ -1519,10 +1632,6 @@ function clearWardrobePending(influencerId) {
 }
 
 function WardrobeGenerator({ influencer, onAdd }) {
-  const styles = influencer.gender === 'Male' ? WARDROBE_STYLES_M : WARDROBE_STYLES_F
-  const hairPresets = influencer.gender === 'Male' ? HAIR_PRESETS_M : HAIR_PRESETS_F
-  const [mode, setMode] = useState('preset')
-  const [selectedStyle, setSelectedStyle] = useState(null)
   const [top, setTop] = useState('')
   const [bottom, setBottom] = useState('')
   const [hair, setHair] = useState('')
@@ -1551,25 +1660,28 @@ function WardrobeGenerator({ influencer, onAdd }) {
 
   // Resume any generation that was running when the user navigated away
   useEffect(() => {
+    // Restore a completed result that was never saved/discarded
+    const savedResult = (() => { try { return JSON.parse(localStorage.getItem(`wd_gen_result_${influencer.id}`) || 'null') } catch { return null } })()
+    if (savedResult?.url) { setResult(savedResult); setSaveName(savedResult.name || 'Custom Look'); return }
+
     const pending = getWardrobePending(influencer.id)
     if (!pending) return
     cancelRef.current = false
     setGenerating(true); setProgress(30)
     initSession()
       .then(() => pollAllJobs(pending.jobIds, 1, setProgress, 16, () => cancelRef.current))
-      .then(urls => { if (!cancelRef.current && urls[0]) { setResult({ url: urls[0], name: pending.label }); setSaveName(pending.label) } })
+      .then(urls => {
+        if (!cancelRef.current && urls[0]) {
+          const r = { url: urls[0], name: pending.label }
+          try { localStorage.setItem(`wd_gen_result_${influencer.id}`, JSON.stringify(r)) } catch {}
+          setResult(r); setSaveName(pending.label)
+        }
+      })
       .catch(e => { if (!cancelRef.current) setError(e.message) })
       .finally(() => { clearWardrobePending(influencer.id); if (!cancelRef.current) { setGenerating(false); setProgress(0) } })
   }, [influencer.id])
 
-  function pickStyle(style) {
-    const next = style.id === selectedStyle ? null : style.id
-    setSelectedStyle(next)
-    if (next) setHair('')
-  }
-
   const canGenerate = refImage && !generating && !result && (
-    mode === 'preset' ? !!selectedStyle :
     customText.trim() || top.trim() || bottom.trim() || hair.trim()
   )
 
@@ -1584,13 +1696,11 @@ function WardrobeGenerator({ influencer, onAdd }) {
     cancelRef.current = false
     setGenerating(true); setProgress(0); setError(null)
     try {
-      const preset = styles.find(s => s.id === selectedStyle)
-      const outfitText = preset ? preset.outfit : [top, bottom].filter(Boolean).join(', ')
-      const hairText = hair || (preset ? preset.hair : '')
-      const label = preset?.label || (mode === 'custom' ? 'Custom Look' : [top, bottom].filter(Boolean).join(' / ') || 'New Look')
+      const outfitText = [top, bottom].filter(Boolean).join(', ')
+      const label = 'Custom Look'
       const prompt = buildWardrobePrompt(influencer, {
-        outfit: outfitText, hair: hairText,
-        customText: mode === 'custom' ? customText : null,
+        outfit: outfitText, hair,
+        customText: customText || null,
       })
       const url = await generateSingleImage({
         prompt, aspectRatio: '16:9', referenceImage: refImage, onProgress: setProgress,
@@ -1598,7 +1708,11 @@ function WardrobeGenerator({ influencer, onAdd }) {
         isCancelled: () => cancelRef.current,
       })
       clearWardrobePending(influencer.id)
-      if (!cancelRef.current && url) { setResult({ url, name: label }); setSaveName(label) }
+      if (!cancelRef.current && url) {
+        const r = { url, name: label }
+        try { localStorage.setItem(`wd_gen_result_${influencer.id}`, JSON.stringify(r)) } catch {}
+        setResult(r); setSaveName(label)
+      }
     } catch (e) {
       clearWardrobePending(influencer.id)
       if (!cancelRef.current && e.message !== 'CANCELLED') setError(e.message)
@@ -1610,10 +1724,12 @@ function WardrobeGenerator({ influencer, onAdd }) {
   function saveToWardrobe() {
     if (!result) return
     onAdd({ id: generateId(), name: saveName.trim() || result.name, image: result.url })
-    setResult(null); setSaveName(''); setSelectedStyle(null); setTop(''); setBottom(''); setHair(''); setCustomText('')
+    try { localStorage.removeItem(`wd_gen_result_${influencer.id}`) } catch {}
+    setResult(null); setSaveName(''); setTop(''); setBottom(''); setHair(''); setCustomText('')
   }
 
   function discardResult() {
+    try { localStorage.removeItem(`wd_gen_result_${influencer.id}`) } catch {}
     setResult(null); setSaveName('')
   }
 
@@ -1626,7 +1742,6 @@ function WardrobeGenerator({ influencer, onAdd }) {
       {/* Header */}
       <div style={{ marginBottom: 16 }}>
         <div style={{ fontSize: 15, fontWeight: 700 }}>Generate Look</div>
-        <div style={{ fontSize: 12, color: 'var(--text-tertiary)', marginTop: 2 }}>Uses character sheet as identity lock · 16:9 · 4K</div>
       </div>
 
       {/* Result preview */}
@@ -1700,69 +1815,26 @@ function WardrobeGenerator({ influencer, onAdd }) {
       {/* Form */}
       {!result && !generating && (<>
 
-        {/* Prominent mode toggle */}
-        <div style={{ display: 'flex', gap: 0, background: 'var(--bg-tertiary)', borderRadius: 10, padding: 3, marginBottom: 18 }}>
-          {[['preset','Style Presets'],['custom','Custom Look']].map(([m,label]) => (
-            <button key={m} onClick={() => setMode(m)} style={{
-              flex: 1, padding: '9px', borderRadius: 8, fontSize: 13, fontWeight: 600,
-              background: mode === m ? 'var(--surface)' : 'transparent',
-              color: mode === m ? 'var(--text-primary)' : 'var(--text-tertiary)',
-              boxShadow: mode === m ? '0 1px 6px rgba(0,0,0,0.10)' : 'none',
-              transition: 'all 0.15s',
-            }}>{label}</button>
-          ))}
-        </div>
-
-        {mode === 'preset' && (<>
-          <div style={{ display: 'flex', gap: 7, flexWrap: 'wrap', marginBottom: 16 }}>
-            {styles.map(s => (
-              <button key={s.id} onClick={() => pickStyle(s)} style={{
-                padding: '7px 14px', borderRadius: 980, fontSize: 13, fontWeight: 500,
-                background: selectedStyle === s.id ? 'linear-gradient(135deg,#EC4899,#8B5CF6)' : 'var(--bg-tertiary)',
-                color: selectedStyle === s.id ? '#fff' : 'var(--text-secondary)',
-                boxShadow: selectedStyle === s.id ? '0 2px 10px rgba(139,92,246,0.28)' : 'none',
-                transition: 'all 0.15s', display: 'flex', alignItems: 'center', gap: 5,
-              }}><span>{s.icon}</span>{s.label}</button>
-            ))}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+            <div>
+              <div style={lS}>Top</div>
+              <input value={top} onChange={e => setTop(e.target.value)} placeholder={influencer.gender === 'Male' ? 'e.g. white oxford shirt' : 'e.g. white crop top'} style={iS} />
+            </div>
+            <div>
+              <div style={lS}>Bottom</div>
+              <input value={bottom} onChange={e => setBottom(e.target.value)} placeholder={influencer.gender === 'Male' ? 'e.g. dark chinos' : 'e.g. baggy jeans'} style={iS} />
+            </div>
           </div>
           <div>
-            <div style={lS}>Hairstyle override</div>
-            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-              {hairPresets.map(h => (
-                <button key={h} onClick={() => setHair(hair === h ? '' : h)} style={{
-                  padding: '5px 11px', borderRadius: 980, fontSize: 12, fontWeight: 500,
-                  background: hair === h ? 'rgba(139,92,246,0.10)' : 'var(--bg-tertiary)',
-                  color: hair === h ? '#8B5CF6' : 'var(--text-secondary)',
-                  border: `1px solid ${hair === h ? 'rgba(139,92,246,0.4)' : 'transparent'}`,
-                  transition: 'all 0.15s',
-                }}>{h}</button>
-              ))}
-            </div>
+            <div style={lS}>Hairstyle</div>
+            <input value={hair} onChange={e => setHair(e.target.value)} placeholder={influencer.gender === 'Male' ? 'e.g. slicked back, low fade' : 'e.g. sleek low bun'} style={iS} />
           </div>
-        </>)}
-
-        {mode === 'custom' && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
-              <div>
-                <div style={lS}>Top</div>
-                <input value={top} onChange={e => setTop(e.target.value)} placeholder={influencer.gender === 'Male' ? 'e.g. white oxford shirt' : 'e.g. white crop top'} style={iS} />
-              </div>
-              <div>
-                <div style={lS}>Bottom</div>
-                <input value={bottom} onChange={e => setBottom(e.target.value)} placeholder={influencer.gender === 'Male' ? 'e.g. dark chinos' : 'e.g. baggy jeans'} style={iS} />
-              </div>
-            </div>
-            <div>
-              <div style={lS}>Hairstyle</div>
-              <input value={hair} onChange={e => setHair(e.target.value)} placeholder={influencer.gender === 'Male' ? 'e.g. slicked back, low fade' : 'e.g. sleek low bun'} style={iS} />
-            </div>
-            <div>
-              <div style={lS}>Or describe the full look</div>
-              <textarea value={customText} onChange={e => setCustomText(e.target.value)} placeholder="e.g. vintage leather jacket over a white tee, dark slim jeans, white sneakers, hair pushed back naturally" rows={3} style={{ ...iS, resize: 'vertical' }} />
-            </div>
+          <div>
+            <div style={lS}>Full look description</div>
+            <textarea value={customText} onChange={e => setCustomText(e.target.value)} placeholder="e.g. vintage leather jacket over a white tee, dark slim jeans, white sneakers, hair pushed back naturally" rows={3} style={{ ...iS, resize: 'vertical' }} />
           </div>
-        )}
+        </div>
 
         {!refImage && (
           <div style={{ fontSize: 12, color: 'var(--text-tertiary)', marginTop: 14, padding: '9px 12px', background: 'var(--bg-tertiary)', borderRadius: 8 }}>
@@ -1928,6 +2000,7 @@ function WorldDropSection({ drops=[], onChange }) {
 function HomeSection({ slots=[], onChange }) {
   const [editId,setEditId]=useState(null)
   const [editName,setEditName]=useState('')
+  const [lightboxUrl,setLightboxUrl]=useState(null)
 
   function addSlot() { onChange([...slots,{id:generateId(),name:`Room ${slots.length+1}`,image:null}]) }
   function updateSlot(id,updates){ onChange(slots.map(s=>s.id===id?{...s,...updates}:s)) }
@@ -1936,6 +2009,7 @@ function HomeSection({ slots=[], onChange }) {
 
   return (
     <div>
+      {lightboxUrl&&<Lightbox images={[lightboxUrl]} startIndex={0} onClose={()=>setLightboxUrl(null)}/>}
       {slots.length===0&&(
         <div style={{textAlign:'center',padding:'52px 0',color:'var(--text-tertiary)'}}>
           <div style={{fontSize:36,marginBottom:10,opacity:.2}}>🏠</div>
@@ -1955,6 +2029,7 @@ function HomeSection({ slots=[], onChange }) {
               onCancelEdit={()=>{setEditId(null);setEditName('')}}
               onImageChange={img=>updateSlot(slot.id,{image:img})}
               onDelete={()=>deleteSlot(slot.id)}
+              onLightbox={()=>setLightboxUrl(slot.image)}
             />
           ))}
         </div>
@@ -1976,17 +2051,61 @@ function HomeSection({ slots=[], onChange }) {
 
 // ─────────────────────────────────────────────
 // Brand deal card — WorldDropCard style with brand + category fields
-function BrandDealCard({ deal, editingBrand, editBrand, onEditBrand, onStartEdit, onCommitEdit, onCancelEdit, onImageChange, onDelete, onCategoryChange }) {
+const GEN_DURATION_MS = 150000 // ~2m30s estimated total
+
+function BrandDealCard({ deal, editingBrand, editBrand, onEditBrand, onStartEdit, onCommitEdit, onCancelEdit, onImageChange, onDelete, onCategoryChange, onLightbox, generating, progress, claudeStatus, onGenerate }) {
   const fileRef = useRef()
   const [hovered,setHovered]=useState(false)
   const [dragOver,setDragOver]=useState(false)
+  const [viewSheet,setViewSheet]=useState(false)
+  const [smoothPct,setSmoothPct]=useState(0)
+  const startRef=useRef(null)
+  const rafRef=useRef(null)
+
+  useEffect(()=>{
+    if(generating){
+      startRef.current=Date.now()
+      setSmoothPct(0)
+      const tick=()=>{
+        const elapsed=Date.now()-startRef.current
+        // Ease toward 90% over GEN_DURATION_MS, never reaches 100 on its own
+        const target=90*(1-Math.exp(-3*elapsed/GEN_DURATION_MS))
+        setSmoothPct(Math.min(target,90))
+        rafRef.current=requestAnimationFrame(tick)
+      }
+      rafRef.current=requestAnimationFrame(tick)
+    } else {
+      cancelAnimationFrame(rafRef.current)
+      setSmoothPct(0)
+    }
+    return()=>cancelAnimationFrame(rafRef.current)
+  },[generating])
+
+  function genLabel(pct){
+    if(pct<8) return 'Asking Claude…'
+    if(pct<20) return 'Uploading…'
+    if(pct<75) return 'Generating…'
+    return 'Almost done…'
+  }
 
   function handleFile(f) {
     if (!f || !f.type.startsWith('image/')) return
     const r = new FileReader()
-    r.onload = ev => compressImage(ev.target.result).then(onImageChange).catch(console.error)
+    r.onload = ev => compressImage(ev.target.result).then(url => {
+      const existing = deal.images || (deal.image ? [deal.image] : [])
+      if (existing.length === 0) {
+        onImageChange(url) // sets deal.image for backward compat
+      } else if (existing.length < 5) {
+        onImageChange(null, [...existing, url]) // append
+      }
+    }).catch(console.error)
     r.readAsDataURL(f)
   }
+
+  const hasSheet = !!deal.characterSheet
+  const hasBoth = hasSheet && !!deal.image
+  const displayImage = hasBoth ? (viewSheet ? deal.characterSheet : deal.image) : (deal.image || deal.characterSheet)
+  useEffect(()=>{ if(deal.characterSheet && !deal.image) setViewSheet(true) },[deal.characterSheet, deal.image])
 
   return (
     <div
@@ -1997,34 +2116,74 @@ function BrandDealCard({ deal, editingBrand, editBrand, onEditBrand, onStartEdit
       {/* Image slot */}
       <div
         style={{aspectRatio:'4/3',background:dragOver?'rgba(139,92,246,0.07)':'var(--bg-tertiary)',overflow:'hidden',cursor:'pointer',position:'relative',transition:'background 0.15s'}}
-        onClick={()=>fileRef.current.click()}
+        onClick={()=>{ if(generating) return; if(displayImage){const imgs=hasBoth?[deal.image,deal.characterSheet]:[displayImage];onLightbox?.(imgs,hasBoth&&viewSheet?1:0)}else{fileRef.current.click()} }}
         onDragOver={e=>{e.preventDefault();setDragOver(true)}}
         onDragLeave={()=>setDragOver(false)}
         onDrop={e=>{e.preventDefault();setDragOver(false);handleFile(e.dataTransfer.files[0])}}
       >
-        {deal.image
+        {displayImage
           ? <>
-              <img src={deal.image} alt="" style={{width:'100%',height:'100%',objectFit:'cover',display:'block'}}/>
-              <div style={{position:'absolute',inset:0,background:'rgba(0,0,0,0)',transition:'background 0.15s'}}
-                onMouseEnter={e=>{e.currentTarget.style.background='rgba(0,0,0,0.2)'}}
-                onMouseLeave={e=>{e.currentTarget.style.background='rgba(0,0,0,0)'}}
-              >
-                <button onClick={e=>{e.stopPropagation();onImageChange(null)}} style={{
-                  position:'absolute',top:6,right:6,width:22,height:22,borderRadius:'50%',
-                  background:'rgba(0,0,0,0.55)',color:'#fff',fontSize:13,
-                  display:'flex',alignItems:'center',justifyContent:'center',
-                  backdropFilter:'blur(4px)',border:'1px solid rgba(255,255,255,0.15)',
-                }}>×</button>
-              </div>
+              <img src={displayImage} alt="" style={{width:'100%',height:'100%',objectFit:'cover',display:'block'}}/>
+              {!generating && (
+                <div style={{position:'absolute',inset:0,background:'rgba(0,0,0,0)',transition:'background 0.15s'}}
+                  onMouseEnter={e=>{e.currentTarget.style.background='rgba(0,0,0,0.2)'}}
+                  onMouseLeave={e=>{e.currentTarget.style.background='rgba(0,0,0,0)'}}
+                >
+                  <button onClick={e=>{e.stopPropagation();fileRef.current.click()}} title="Change image" style={{
+                    position:'absolute',top:6,left:6,width:22,height:22,borderRadius:'50%',
+                    background:'rgba(0,0,0,0.55)',color:'#fff',fontSize:11,
+                    display:'flex',alignItems:'center',justifyContent:'center',
+                    backdropFilter:'blur(4px)',border:'1px solid rgba(255,255,255,0.15)',
+                  }}>↑</button>
+                  <button onClick={e=>{e.stopPropagation();onImageChange(null)}} style={{
+                    position:'absolute',top:6,right:6,width:22,height:22,borderRadius:'50%',
+                    background:'rgba(0,0,0,0.55)',color:'#fff',fontSize:13,
+                    display:'flex',alignItems:'center',justifyContent:'center',
+                    backdropFilter:'blur(4px)',border:'1px solid rgba(255,255,255,0.15)',
+                  }}>×</button>
+                </div>
+              )}
+              {hasBoth && !generating && (
+                <div style={{position:'absolute',bottom:6,left:6,display:'flex',background:'rgba(0,0,0,0.55)',borderRadius:7,padding:2,backdropFilter:'blur(4px)',gap:2}} onClick={e=>e.stopPropagation()}>
+                  <button onClick={e=>{e.stopPropagation();setViewSheet(false)}} style={{padding:'2px 7px',borderRadius:5,fontSize:9,fontWeight:700,border:'none',cursor:'pointer',lineHeight:1.4,background:!viewSheet?'#fff':'transparent',color:!viewSheet?'#000':'rgba(255,255,255,0.65)'}}>Orig</button>
+                  <button onClick={e=>{e.stopPropagation();setViewSheet(true)}} style={{padding:'2px 7px',borderRadius:5,fontSize:9,fontWeight:700,border:'none',cursor:'pointer',lineHeight:1.4,background:viewSheet?'#fff':'transparent',color:viewSheet?'#000':'rgba(255,255,255,0.65)'}}>Sheet</button>
+                </div>
+              )}
             </>
           : <div style={{width:'100%',height:'100%',display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',gap:6}}>
               <span style={{fontSize:22,opacity:dragOver?0.6:0.22}}>+</span>
               <span style={{fontSize:11,color:'var(--text-tertiary)',fontWeight:500}}>{dragOver?'Drop to upload':'Upload or drag & drop'}</span>
             </div>
         }
-        <input ref={fileRef} type="file" accept="image/*" style={{display:'none'}}
-          onChange={e=>{handleFile(e.target.files[0]);e.target.value=''}}/>
+        {generating && (
+          <div style={{position:'absolute',inset:0,background:'rgba(0,0,0,0.62)',display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',gap:10}}>
+            <div style={{width:24,height:24,borderRadius:'50%',border:'2.5px solid rgba(255,255,255,0.2)',borderTopColor:'#fff',animation:'bdSpin 0.75s linear infinite'}}/>
+            <div style={{color:'#fff',fontSize:11,fontWeight:600}}>{genLabel(smoothPct)}</div>
+            <div style={{width:100,height:3,borderRadius:99,background:'rgba(255,255,255,0.15)'}}>
+              <div style={{height:'100%',borderRadius:99,background:'#fff',width:`${smoothPct}%`,transition:'width 0.4s ease'}}/>
+            </div>
+          </div>
+        )}
+        {!generating && claudeStatus && (
+          <div style={{position:'absolute',bottom:6,right:6,fontSize:10,fontWeight:700,padding:'3px 7px',borderRadius:6,backdropFilter:'blur(6px)',
+            background: claudeStatus==='done' ? 'rgba(52,199,89,0.85)' : claudeStatus==='analyzing' ? 'rgba(139,92,246,0.85)' : 'rgba(255,59,48,0.85)',
+            color:'#fff',maxWidth:'90%',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',
+          }}>
+            {claudeStatus==='done' ? '✓ Claude analyzed' : claudeStatus==='analyzing' ? 'Claude analyzing…' : '✗ '+claudeStatus.replace('error:','')}
+          </div>
+        )}
+        <input ref={fileRef} type="file" accept="image/*" multiple style={{display:'none'}}
+          onChange={e=>{Array.from(e.target.files).forEach(f=>handleFile(f));e.target.value=''}}/>
       </div>
+
+      {/* Extra images strip */}
+      {(deal.images?.length > 1) && (
+        <div style={{display:'flex',gap:4,padding:'6px 8px 0',overflowX:'auto'}}>
+          {deal.images.map((img,i) => (
+            <img key={i} src={img} alt="" style={{width:36,height:36,borderRadius:6,objectFit:'cover',flexShrink:0,opacity:i===0?0.5:1}} title={i===0?'Main (shown above)':'Extra angle'}/>
+          ))}
+        </div>
+      )}
 
       {/* Brand + category + actions */}
       <div style={{padding:'10px 12px'}}>
@@ -2036,17 +2195,12 @@ function BrandDealCard({ deal, editingBrand, editBrand, onEditBrand, onStartEdit
                 style={{flex:1,fontSize:13,fontWeight:700,border:'none',background:'transparent',color:'var(--text-primary)',outline:'none'}}/>
             : <span style={{flex:1,fontSize:13,fontWeight:700,color:'var(--text-primary)',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{deal.brand}</span>
           }
-          <div style={{display:'flex',gap:3,flexShrink:0,opacity:hovered?1:0,transition:'opacity 0.15s'}}>
-            <button onClick={e=>{e.stopPropagation();onStartEdit()}} title="Rename" style={{
-              width:26,height:26,borderRadius:7,border:'none',cursor:'pointer',
-              background:'var(--bg-tertiary)',color:'var(--text-secondary)',
-              display:'flex',alignItems:'center',justifyContent:'center',fontSize:13,
-            }}>✎</button>
-            <button onClick={e=>{e.stopPropagation();onDelete()}} title="Delete" style={{
-              width:26,height:26,borderRadius:7,border:'none',cursor:'pointer',
-              background:'rgba(255,59,48,0.08)',color:'#FF3B30',
-              display:'flex',alignItems:'center',justifyContent:'center',fontSize:15,lineHeight:1,
-            }}>×</button>
+          <div style={{display:'flex',gap:3,flexShrink:0,opacity:hovered&&!generating?1:0,transition:'opacity 0.15s'}}>
+            {hasSheet && (
+              <button onClick={e=>{e.stopPropagation();downloadImage(deal.characterSheet,`${deal.brand}-sheet.jpg`)}} title="Download sheet" style={{width:22,height:22,borderRadius:6,border:'none',cursor:'pointer',background:'var(--bg-tertiary)',color:'var(--text-secondary)',display:'flex',alignItems:'center',justifyContent:'center',fontSize:11}}>↓</button>
+            )}
+            <button onClick={e=>{e.stopPropagation();onStartEdit()}} title="Rename" style={{width:22,height:22,borderRadius:6,border:'none',cursor:'pointer',background:'var(--bg-tertiary)',color:'var(--text-secondary)',display:'flex',alignItems:'center',justifyContent:'center',fontSize:11}}>✎</button>
+            <button onClick={e=>{e.stopPropagation();onDelete()}} title="Delete" style={{width:22,height:22,borderRadius:6,border:'none',cursor:'pointer',background:'rgba(255,59,48,0.08)',color:'#FF3B30',display:'flex',alignItems:'center',justifyContent:'center',fontSize:13,lineHeight:1}}>×</button>
           </div>
         </div>
         <input
@@ -2056,7 +2210,14 @@ function BrandDealCard({ deal, editingBrand, editBrand, onEditBrand, onStartEdit
           placeholder="Category (e.g. Beauty, Tech…)"
           style={{width:'100%',fontSize:11,color:'var(--text-tertiary)',border:'none',background:'transparent',outline:'none',boxSizing:'border-box'}}
         />
+        {deal.image && !generating && (
+          <button
+            onClick={e=>{e.stopPropagation();onGenerate(deal)}}
+            style={{marginTop:8,width:'100%',padding:'5px 0',borderRadius:6,fontSize:11,fontWeight:600,background:hasSheet?'var(--bg-tertiary)':'linear-gradient(135deg,#EC4899,#8B5CF6)',color:hasSheet?'var(--text-secondary)':'#fff',boxShadow:hasSheet?'none':'0 1px 6px rgba(139,92,246,0.3)',transition:'all 0.15s',cursor:'pointer'}}
+          >{hasSheet ? '↺ Regenerate Sheet' : 'Generate Sheet'}</button>
+        )}
       </div>
+      <style>{`@keyframes bdSpin{to{transform:rotate(360deg)}}`}</style>
     </div>
   )
 }
@@ -2064,26 +2225,27 @@ function BrandDealCard({ deal, editingBrand, editBrand, onEditBrand, onStartEdit
 function NewBrandModal({ onClose, onSave }) {
   const [brand, setBrand] = useState('')
   const [category, setCategory] = useState('')
-  const [image, setImage] = useState(null)
+  const [images, setImages] = useState([])
   const [dragging, setDragging] = useState(false)
   const fileRef = useRef()
 
-  function handleFile(f) {
-    if (!f || !f.type.startsWith('image/')) return
-    const r = new FileReader()
-    r.onload = ev => compressImage(ev.target.result).then(setImage)
-    r.readAsDataURL(f)
+  function handleFiles(files) {
+    const arr = Array.from(files).filter(f => f.type.startsWith('image/')).slice(0, 5 - images.length)
+    arr.forEach(f => {
+      const r = new FileReader()
+      r.onload = ev => compressImage(ev.target.result).then(url => setImages(prev => [...prev, url].slice(0, 5)))
+      r.readAsDataURL(f)
+    })
   }
 
   return (
     <div onClick={onClose} style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.4)',backdropFilter:'blur(6px)',display:'flex',alignItems:'center',justifyContent:'center',zIndex:300}}>
-      <div onClick={e=>e.stopPropagation()} style={{background:'var(--surface)',borderRadius:20,padding:28,width:380,maxWidth:'90vw',boxShadow:'var(--shadow-lg)'}}>
+      <div onClick={e=>e.stopPropagation()} style={{background:'var(--surface)',borderRadius:20,padding:28,width:400,maxWidth:'90vw',boxShadow:'var(--shadow-lg)'}}>
         <div style={{fontSize:18,fontWeight:700,letterSpacing:'-0.4px',marginBottom:20}}>New Brand Deal</div>
 
         <label style={{display:'block',marginBottom:14}}>
           <div style={{fontSize:11,fontWeight:700,color:'var(--text-secondary)',textTransform:'uppercase',letterSpacing:'0.5px',marginBottom:6}}>Brand Name</div>
           <input autoFocus value={brand} onChange={e=>setBrand(e.target.value)}
-            onKeyDown={e=>{if(e.key==='Enter'&&brand.trim())onSave({brand,category,image})}}
             placeholder="e.g. Nike"
             style={{width:'100%',padding:'10px 14px',borderRadius:8,border:'1.5px solid var(--border)',background:'var(--bg)',fontSize:14,color:'var(--text-primary)',boxSizing:'border-box'}}/>
         </label>
@@ -2096,43 +2258,45 @@ function NewBrandModal({ onClose, onSave }) {
         </label>
 
         <div style={{marginBottom:22}}>
-          <div style={{fontSize:11,fontWeight:700,color:'var(--text-secondary)',textTransform:'uppercase',letterSpacing:'0.5px',marginBottom:8}}>Brand Image</div>
+          <div style={{fontSize:11,fontWeight:700,color:'var(--text-secondary)',textTransform:'uppercase',letterSpacing:'0.5px',marginBottom:4}}>Product Images</div>
+          <div style={{fontSize:11,color:'var(--text-tertiary)',marginBottom:10}}>Up to 5 angles — front, back, sides, details. More = more accurate.</div>
           <div
-            onClick={()=>fileRef.current.click()}
             onDragOver={e=>{e.preventDefault();setDragging(true)}}
-            onDragLeave={()=>setDragging(false)}
-            onDrop={e=>{e.preventDefault();setDragging(false);handleFile(e.dataTransfer.files[0])}}
+            onDragLeave={e=>{if(!e.currentTarget.contains(e.relatedTarget))setDragging(false)}}
+            onDrop={e=>{e.preventDefault();setDragging(false);handleFiles(e.dataTransfer.files)}}
             style={{
-              width:'100%',aspectRatio:'16/9',borderRadius:10,overflow:'hidden',cursor:'pointer',
-              border:image?'none':`1.5px dashed ${dragging?'#8B5CF6':'var(--border)'}`,
-              background:image?'transparent':dragging?'rgba(139,92,246,0.07)':'var(--bg-tertiary)',
-              display:'flex',alignItems:'center',justifyContent:'center',flexDirection:'column',gap:6,
-              transition:'border-color 0.15s, background 0.15s',
+              borderRadius:10,padding:8,
+              border: dragging ? '1.5px dashed #8B5CF6' : '1.5px dashed transparent',
+              background: dragging ? 'rgba(139,92,246,0.07)' : 'transparent',
+              transition:'all 0.15s',
             }}
           >
-            {image
-              ? <img src={image} alt="" style={{width:'100%',height:'100%',objectFit:'cover'}}/>
-              : <>
-                  <span style={{fontSize:22,opacity:dragging?0.6:0.25}}>+</span>
-                  <span style={{fontSize:12,color:'var(--text-tertiary)'}}>{dragging?'Drop to upload':'Upload or drag & drop'}</span>
-                </>
-            }
+            <div style={{display:'grid',gridTemplateColumns:'repeat(3,1fr)',gap:8}}>
+              {images.map((img,i) => (
+                <div key={i} style={{position:'relative',aspectRatio:'1',borderRadius:8,overflow:'hidden',background:'var(--bg-tertiary)'}}>
+                  <img src={img} alt="" style={{width:'100%',height:'100%',objectFit:'cover'}}/>
+                  <button onClick={()=>setImages(prev=>prev.filter((_,j)=>j!==i))}
+                    style={{position:'absolute',top:4,right:4,width:18,height:18,borderRadius:'50%',background:'rgba(0,0,0,0.6)',color:'#fff',fontSize:11,border:'none',cursor:'pointer',display:'flex',alignItems:'center',justifyContent:'center'}}>×</button>
+                  {i===0&&<div style={{position:'absolute',bottom:4,left:4,fontSize:9,fontWeight:700,background:'rgba(0,0,0,0.6)',color:'#fff',padding:'2px 5px',borderRadius:4}}>MAIN</div>}
+                </div>
+              ))}
+              {images.length < 5 && (
+                <div onClick={()=>fileRef.current.click()} style={{aspectRatio:'1',borderRadius:8,border:'1.5px dashed var(--border)',display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',gap:4,cursor:'pointer',background:'var(--bg-tertiary)'}}>
+                  <span style={{fontSize:20,opacity:0.3}}>+</span>
+                  <span style={{fontSize:10,color:'var(--text-tertiary)'}}>{dragging?'Drop here':'Add photo'}</span>
+                </div>
+              )}
+            </div>
           </div>
-          <input ref={fileRef} type="file" accept="image/*" style={{display:'none'}} onChange={e=>{handleFile(e.target.files[0]);e.target.value=''}}/>
+          <input ref={fileRef} type="file" accept="image/*" multiple style={{display:'none'}} onChange={e=>{handleFiles(e.target.files);e.target.value=''}}/>
         </div>
 
         <div style={{display:'flex',gap:10}}>
           <button onClick={onClose} style={{flex:1,padding:'10px',borderRadius:10,border:'1.5px solid var(--border)',fontSize:14,fontWeight:500,color:'var(--text-secondary)',background:'transparent'}}>Cancel</button>
           <button
             disabled={!brand.trim()}
-            onClick={()=>onSave({brand,category,image})}
-            style={{
-              flex:2,padding:'10px',borderRadius:10,fontSize:14,fontWeight:700,
-              background:brand.trim()?'linear-gradient(135deg,#EC4899,#8B5CF6)':'var(--border)',
-              color:brand.trim()?'#fff':'var(--text-tertiary)',
-              boxShadow:brand.trim()?'0 2px 12px rgba(139,92,246,0.3)':'none',
-              transition:'all 0.15s',
-            }}
+            onClick={()=>onSave({brand,category,image:images[0]||null,images})}
+            style={{flex:2,padding:'10px',borderRadius:10,fontSize:14,fontWeight:700,background:brand.trim()?'linear-gradient(135deg,#EC4899,#8B5CF6)':'var(--border)',color:brand.trim()?'#fff':'var(--text-tertiary)',boxShadow:brand.trim()?'0 2px 12px rgba(139,92,246,0.3)':'none',transition:'all 0.15s'}}
           >Add Brand</button>
         </div>
       </div>
@@ -2140,22 +2304,149 @@ function NewBrandModal({ onClose, onSave }) {
   )
 }
 
+function ImportBrandDealsModal({ deals, existingBrands, onImport, onClose }) {
+  const [selected, setSelected] = useState(new Set())
+  const toggle = id => setSelected(s => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n })
+
+  return (
+    <div onClick={onClose} style={{ position:'fixed',inset:0,background:'rgba(0,0,0,0.55)',backdropFilter:'blur(8px)',display:'flex',alignItems:'center',justifyContent:'center',zIndex:300 }}>
+      <div onClick={e=>e.stopPropagation()} style={{ background:'var(--surface)',borderRadius:20,padding:28,width:560,maxWidth:'92vw',boxShadow:'var(--shadow-lg)',maxHeight:'80vh',display:'flex',flexDirection:'column' }}>
+        <div style={{ fontSize:18,fontWeight:700,letterSpacing:'-0.4px',marginBottom:4 }}>Import Brand Deals</div>
+        <div style={{ fontSize:13,color:'var(--text-secondary)',marginBottom:20 }}>Select deals from the Brand Deals page to add to this influencer.</div>
+
+        {deals.length === 0 ? (
+          <div style={{ textAlign:'center',padding:'40px 20px',color:'var(--text-tertiary)',fontSize:13 }}>
+            No brand deals yet — add some on the Brand Deals page first.
+          </div>
+        ) : (
+          <div style={{ overflowY:'auto',flex:1,display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(140px,1fr))',gap:10,marginBottom:20 }}>
+            {deals.map(deal => {
+              const already = existingBrands.has(deal.brand.toLowerCase())
+              const isSelected = selected.has(deal.id)
+              const thumb = deal.characterSheet || deal.image
+              return (
+                <div
+                  key={deal.id}
+                  onClick={() => !already && toggle(deal.id)}
+                  style={{
+                    borderRadius:12,overflow:'hidden',cursor:already?'default':'pointer',
+                    border:`2px solid ${isSelected?'#8B5CF6':already?'var(--border-subtle)':'var(--border)'}`,
+                    background: isSelected ? 'rgba(139,92,246,0.08)' : 'var(--bg)',
+                    opacity: already ? 0.5 : 1,
+                    transition:'border-color 0.15s',
+                  }}
+                >
+                  <div style={{ aspectRatio:'16/9',background:'var(--bg-tertiary)',position:'relative' }}>
+                    {thumb
+                      ? <img src={thumb} alt={deal.brand} style={{ width:'100%',height:'100%',objectFit:'cover',display:'block' }}/>
+                      : <div style={{ width:'100%',height:'100%',display:'flex',alignItems:'center',justifyContent:'center',fontSize:28,fontWeight:800,color:'var(--text-tertiary)',opacity:0.25 }}>{deal.brand[0]}</div>
+                    }
+                    {isSelected && (
+                      <div style={{ position:'absolute',top:6,right:6,width:20,height:20,borderRadius:'50%',background:'#8B5CF6',display:'flex',alignItems:'center',justifyContent:'center',fontSize:11,color:'#fff',fontWeight:700 }}>✓</div>
+                    )}
+                    {already && (
+                      <div style={{ position:'absolute',inset:0,display:'flex',alignItems:'center',justifyContent:'center',background:'rgba(0,0,0,0.35)',fontSize:11,fontWeight:700,color:'#fff' }}>Already added</div>
+                    )}
+                  </div>
+                  <div style={{ padding:'8px 10px' }}>
+                    <div style={{ fontSize:12,fontWeight:700,color:'var(--text-primary)',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap' }}>{deal.brand}</div>
+                    {deal.category && <div style={{ fontSize:10,color:'var(--text-tertiary)',marginTop:1 }}>{deal.category}</div>}
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        )}
+
+        <div style={{ display:'flex',gap:10 }}>
+          <button onClick={onClose} style={{ flex:1,padding:'11px',borderRadius:10,border:'1.5px solid var(--border)',fontSize:14,fontWeight:500,color:'var(--text-secondary)',background:'transparent',cursor:'pointer',fontFamily:'inherit' }}>Cancel</button>
+          <button
+            disabled={selected.size === 0}
+            onClick={() => { onImport(deals.filter(d => selected.has(d.id))); onClose() }}
+            style={{ flex:2,padding:'11px',borderRadius:10,background:selected.size?'linear-gradient(135deg,#EC4899,#8B5CF6)':'var(--bg-tertiary)',color:selected.size?'#fff':'var(--text-tertiary)',fontSize:14,fontWeight:700,border:'none',cursor:selected.size?'pointer':'default',fontFamily:'inherit' }}
+          >Import {selected.size > 0 ? `${selected.size} Deal${selected.size>1?'s':''}` : 'Selected'}</button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 function BrandDealSection({ deals=[], onChange }) {
+  const [globalDeals] = useBrandDeals()
   const [showModal, setShowModal] = useState(false)
+  const [showImport, setShowImport] = useState(false)
   const [editId,setEditId]=useState(null)
   const [editBrand,setEditBrand]=useState('')
+  const [lightbox,setLightbox]=useState(null)
+  const [generating,setGenerating]=useState({})
+  const [genProgress,setGenProgress]=useState({})
+  const [claudeStatus,setClaudeStatus]=useState({})
 
-  function addDeal({brand,category,image}) {
-    onChange([...deals,{id:generateId(),brand,category,image}])
+  const existingBrands = new Set(deals.map(d => d.brand.toLowerCase()))
+
+  function addDeal({brand,category,image,images}) {
+    onChange([...deals,{id:generateId(),brand,category,image,images:images||[]}])
     setShowModal(false)
+  }
+
+  function importDeals(toImport) {
+    const fresh = toImport
+      .filter(d => !existingBrands.has(d.brand.toLowerCase()))
+      .map(d => ({ ...d, id: generateId() }))
+    if (fresh.length) onChange([...deals, ...fresh])
   }
   function updateDeal(id,updates){ onChange(deals.map(d=>d.id===id?{...d,...updates}:d)) }
   function deleteDeal(id){ onChange(deals.filter(d=>d.id!==id)) }
   function commitRename(){ if(editBrand.trim()) updateDeal(editId,{brand:editBrand.trim()}); setEditId(null); setEditBrand('') }
 
+  async function handleGenerate(deal) {
+    if (!isHFConnected()) { alert('Connect Higgsfield in Settings first'); return }
+    if (!deal.image) { alert('Upload a product image first'); return }
+
+    setGenerating(g=>({...g,[deal.id]:true}))
+    setGenProgress(p=>({...p,[deal.id]:0}))
+
+    let imagePrompt = null
+    const claudeKey = localStorage.getItem('claude_api_key')
+    const allImages = deal.images?.length ? deal.images : (deal.image ? [deal.image] : [])
+    if (claudeKey && allImages.length) {
+      setClaudeStatus(s=>({...s,[deal.id]:'analyzing'}))
+      try {
+        setGenProgress(p=>({...p,[deal.id]:5}))
+        imagePrompt = await buildCharSheetPromptWithClaude(allImages, deal.brand, deal.category, claudeKey)
+        setClaudeStatus(s=>({...s,[deal.id]:'done'}))
+        setTimeout(()=>setClaudeStatus(s=>({...s,[deal.id]:null})),3000)
+      } catch(e) {
+        alert('Claude: ' + e.message)
+        setClaudeStatus(s=>({...s,[deal.id]:'error:'+e.message}))
+        setTimeout(()=>setClaudeStatus(s=>({...s,[deal.id]:null})),5000)
+      }
+    }
+    if (!imagePrompt) imagePrompt = buildCharSheetPrompt(deal.brand, deal.category)
+
+    try {
+      setGenProgress(p=>({...p,[deal.id]:15}))
+      const sheetUrl = await generateSingleImage({
+        prompt: imagePrompt,
+        aspectRatio: '16:9',
+        referenceImage: deal.image,
+        onProgress: pct=>setGenProgress(prev=>({...prev,[deal.id]:pct})),
+      })
+      if (sheetUrl) updateDeal(deal.id,{characterSheet:sheetUrl})
+    } catch(e) {
+      console.error('[CharSheet] Higgsfield error:', e)
+      if (!e.message?.includes('CANCELLED')) alert('Image generation step failed: '+e.message)
+    } finally {
+      setGenerating(g=>({...g,[deal.id]:false}))
+      setGenProgress(p=>({...p,[deal.id]:0}))
+    }
+  }
+
   return (
     <div>
+      {lightbox&&<Lightbox images={lightbox.images} startIndex={lightbox.start||0} onClose={()=>setLightbox(null)}/>}
       {showModal && <NewBrandModal onClose={()=>setShowModal(false)} onSave={addDeal}/>}
+      {showImport && <ImportBrandDealsModal deals={globalDeals} existingBrands={existingBrands} onImport={importDeals} onClose={()=>setShowImport(false)}/>}
       {deals.length===0&&(
         <div style={{textAlign:'center',padding:'52px 0',color:'var(--text-tertiary)'}}>
           <div style={{fontSize:36,marginBottom:10,opacity:.2}}>🤝</div>
@@ -2173,24 +2464,44 @@ function BrandDealSection({ deals=[], onChange }) {
               onStartEdit={()=>{setEditId(deal.id);setEditBrand(deal.brand)}}
               onCommitEdit={commitRename}
               onCancelEdit={()=>{setEditId(null);setEditBrand('')}}
-              onImageChange={img=>updateDeal(deal.id,{image:img})}
+              onImageChange={(img,imgs)=>updateDeal(deal.id, imgs ? {images:imgs,image:imgs[0],characterSheet:null} : {image:img,images:img?[img]:[],characterSheet:null})}
               onDelete={()=>deleteDeal(deal.id)}
               onCategoryChange={cat=>updateDeal(deal.id,{category:cat})}
+              onLightbox={(imgs,start)=>setLightbox({images:imgs,start:start||0})}
+              generating={!!generating[deal.id]}
+              progress={genProgress[deal.id]||0}
+              claudeStatus={claudeStatus[deal.id]||null}
+              onGenerate={handleGenerate}
             />
           ))}
         </div>
       )}
-      <button onClick={()=>setShowModal(true)} style={{
-        display:'flex',alignItems:'center',gap:6,
-        padding:'8px 16px',borderRadius:8,
-        border:'1.5px dashed var(--border)',
-        background:'transparent',color:'var(--text-secondary)',
-        fontSize:13,fontWeight:500,cursor:'pointer',
-        transition:'border-color 0.15s, color 0.15s',
-      }}
-        onMouseEnter={e=>{e.currentTarget.style.borderColor='var(--accent)';e.currentTarget.style.color='var(--accent)'}}
-        onMouseLeave={e=>{e.currentTarget.style.borderColor='var(--border)';e.currentTarget.style.color='var(--text-secondary)'}}
-      >+ Add Brand</button>
+      <div style={{ display:'flex',gap:8,flexWrap:'wrap' }}>
+        <button onClick={()=>setShowModal(true)} style={{
+          display:'flex',alignItems:'center',gap:6,
+          padding:'8px 16px',borderRadius:8,
+          border:'1.5px dashed var(--border)',
+          background:'transparent',color:'var(--text-secondary)',
+          fontSize:13,fontWeight:500,cursor:'pointer',
+          transition:'border-color 0.15s, color 0.15s',
+        }}
+          onMouseEnter={e=>{e.currentTarget.style.borderColor='var(--accent)';e.currentTarget.style.color='var(--accent)'}}
+          onMouseLeave={e=>{e.currentTarget.style.borderColor='var(--border)';e.currentTarget.style.color='var(--text-secondary)'}}
+        >+ Add Brand</button>
+        {globalDeals.length > 0 && (
+          <button onClick={()=>setShowImport(true)} style={{
+            display:'flex',alignItems:'center',gap:6,
+            padding:'8px 16px',borderRadius:8,
+            border:'1.5px solid rgba(139,92,246,0.35)',
+            background:'rgba(139,92,246,0.07)',color:'#8B5CF6',
+            fontSize:13,fontWeight:600,cursor:'pointer',
+            transition:'border-color 0.15s, background 0.15s',
+          }}
+            onMouseEnter={e=>{e.currentTarget.style.background='rgba(139,92,246,0.14)';e.currentTarget.style.borderColor='#8B5CF6'}}
+            onMouseLeave={e=>{e.currentTarget.style.background='rgba(139,92,246,0.07)';e.currentTarget.style.borderColor='rgba(139,92,246,0.35)'}}
+          >↓ Import from Brand Deals</button>
+        )}
+      </div>
     </div>
   )
 }
@@ -2228,7 +2539,7 @@ function Sec({ children, style }) {
 
 // ─────────────────────────────────────────────
 // Detail tabs with palette-tinted active state
-const DETAIL_TABS = ['Overview','Scripts','Wardrobe','Home','Brand Deals']
+const DETAIL_TABS = ['Overview','Scripts','Wardrobe','Home','Brand Deals','History']
 
 function Tabs({ active, onChange, ac }) {
   const tc = accentText(ac)
@@ -2269,6 +2580,32 @@ const CS_ENV_PRESETS = {
   'Gym':         'in the gym',
   'Studio':      'in a studio',
 }
+const AMBIENT_SOUND = {
+  'Bedroom':     'Quiet room tone — soft, near-silent background.',
+  'Bathroom':    'Subtle bathroom reverb — clean, minimal background.',
+  'Kitchen':     'Light kitchen ambience — faint appliance hum, natural room tone.',
+  'Coffee Shop': 'Ambient coffee shop — low chatter, espresso machine, soft background bustle.',
+  'Mall / Store':'Ambient mall — light crowd murmur, distant music.',
+  'Street':      'Outdoor city ambience — light traffic, natural wind, distant urban activity.',
+  'Gym':         'Ambient gym — distant weights, low activity, faint background music.',
+  'Studio':      'Clean studio silence — minimal room tone, no background noise.',
+}
+function inferAmbientSound(envKey, environment) {
+  if (envKey && AMBIENT_SOUND[envKey]) return AMBIENT_SOUND[envKey]
+  const e = (environment || envKey || '').toLowerCase()
+  if (/restaurant|dining|bistro|brasserie|diner/.test(e)) return 'Ambient restaurant — low dining chatter, cutlery, warm bustle.'
+  if (/beach|ocean|sea|shore|surf/.test(e)) return 'Ambient beach — waves, light breeze, distant seagulls.'
+  if (/park|garden|nature|forest|woods/.test(e)) return 'Outdoor ambience — birds, light breeze, natural sounds.'
+  if (/office|work|corporate|coworking/.test(e)) return 'Quiet office ambience — distant keyboard, low HVAC hum.'
+  if (/car|vehicle|driving|road/.test(e)) return 'Ambient car interior — engine hum, road noise.'
+  if (/bar|club|lounge|nightclub/.test(e)) return 'Ambient nightlife — low crowd murmur, distant music, gentle bass.'
+  if (/pool|spa|resort|hotel/.test(e)) return 'Ambient resort — light water, gentle breeze, relaxed atmosphere.'
+  if (/market|bazaar|store|shop/.test(e)) return 'Ambient market — light crowd, distant chatter.'
+  if (/rooftop|terrace|balcony/.test(e)) return 'Outdoor rooftop ambience — light wind, distant city sounds.'
+  if (/airport|station|transit/.test(e)) return 'Ambient transit sounds — light crowd, distant announcements.'
+  return 'Natural ambient sound — location-appropriate background audio.'
+}
+
 const CS_CAMERAS = [
   'Handheld','Tripod','Talking Head',
 ]
@@ -2491,6 +2828,7 @@ function parseAdditionalNotes(notes, durationSecs) {
         .replace(/[.!?]+$/, '')
 
       if (!/^(she|he|they)\b/i.test(text)) text = `She ${text.charAt(0).toLowerCase()}${text.slice(1)}`
+      text = text.charAt(0).toUpperCase() + text.slice(1)
 
       actionBeats.push({ text, timestamp: ts, fraction, fired: false })
     } else {
@@ -2510,7 +2848,7 @@ function parseAdditionalNotes(notes, durationSecs) {
 // micro-expressions (max 2), CTA lands like a friend's tip not a pitch.
 // productTag = the @image_N string for the product (e.g. '@image_5'), or null
 // isHandheld = true when the subject is self-filming while walking
-function annotateDialogue(rawText, productTag, durationSecs, isHandheld = false, wearMode = false, actionBeats = []) {
+function annotateDialogue(rawText, productTag, durationSecs, isHandheld = false, wearMode = false, actionBeats = [], she = 'she', her = 'her', his = 'her') { // his = possessive ('her'/'his')
   if (!rawText.trim()) return ''
 
   // Split into clauses:
@@ -2532,12 +2870,14 @@ function annotateDialogue(rawText, productTag, durationSecs, isHandheld = false,
   // has a physical beat with the product — keeps it visible without feeling staged.
   // All gestures are body-position-agnostic so they work for any wearable
   // (cap, bracelet, necklace, shirt, shoes, earrings, sunglasses, etc.)
+  const She = she.charAt(0).toUpperCase() + she.slice(1)
+  const Her = her.charAt(0).toUpperCase() + her.slice(1)
   const WORN_GESTURES = prod ? [
-    `She touches ${prod} briefly — natural, not staged.`,
-    `Her hand goes to ${prod} for a beat, then back to natural position.`,
-    `She glances toward ${prod}, then back to lens — draws attention to it without words.`,
-    `She adjusts ${prod} slightly — natural reflex, eyes stay on camera.`,
-    `She angles her body so ${prod} is clearly visible, then settles back.`,
+    `${She} touches ${prod} briefly — natural, not staged.`,
+    `${Her} hand goes to ${prod} for a beat, then back to natural position.`,
+    `${She} glances toward ${prod}, then back to lens — draws attention to it without words.`,
+    `${She} adjusts ${prod} slightly — natural reflex, eyes stay on camera.`,
+    `${She} angles ${his} body so ${prod} is clearly visible, then settles back.`,
   ] : []
   let wornGestureIdx = 0
   let wornGestureCounter = 0
@@ -2558,15 +2898,15 @@ function annotateDialogue(rawText, productTag, durationSecs, isHandheld = false,
   if (isHandheld) {
     out.push(prod
       ? wearMode
-        ? `@image_1 is self-filming — holding the phone in one hand, ${prod} worn. She is already walking. Camera bobs with her steps from 0:00. One breath before she speaks.`
-        : `@image_1 is self-filming — holding the phone in one hand, ${prod} in the other. She is already walking. Camera bobs with her steps from 0:00. One breath before she speaks.`
-      : `@image_1 is self-filming — holding the phone at arm's length, already walking. Camera bobs with her steps from 0:00. One breath before she speaks.`
+        ? `@image_1 is self-filming — arm extended toward camera, ${prod} worn. ${she.charAt(0).toUpperCase()+she.slice(1)} is already walking. Camera bobs with ${his} steps from 0:00. One breath before ${she} speaks.`
+        : `@image_1 is self-filming — arm extended toward camera, ${prod} in the other hand. ${she.charAt(0).toUpperCase()+she.slice(1)} is already walking. Camera bobs with ${his} steps from 0:00. One breath before ${she} speaks.`
+      : `@image_1 is self-filming — arm extended toward camera, already walking. Camera bobs with ${his} steps from 0:00. One breath before ${she} speaks.`
     )
   } else {
     out.push(prod
       ? wearMode
-        ? `@image_1 faces camera, ${prod} worn from 0:00. She touches or adjusts ${prod} once early — natural reflex that draws attention to it. One breath before she starts.`
-        : `@image_1 faces camera, ${prod} in hand from 0:00. One breath before she starts.`
+        ? `@image_1 faces camera, ${prod} worn from 0:00. ${she.charAt(0).toUpperCase()+she.slice(1)} touches or adjusts ${prod} once early — natural reflex that draws attention to it. One breath before ${she} starts.`
+        : `@image_1 faces camera, ${prod} in hand from 0:00. One breath before ${she} starts.`
       : `@image_1 faces camera. Eyes on lens. One breath.`
     )
   }
@@ -2626,7 +2966,7 @@ function annotateDialogue(rawText, productTag, durationSecs, isHandheld = false,
 
     // First line — hook opener
     if (i === 0) {
-      const m = useMicro(' Corners of her mouth pull back — genuine, not performed.')
+      const m = useMicro(` Corners of ${his} mouth pull back — genuine, not performed.`)
       out.push(`"${s}" [beat.]${m}`)
       return
     }
@@ -2690,7 +3030,679 @@ const VIDEO_MAX_WORDS = {4:14,5:17,6:21,7:24,8:28,9:32,10:35,11:38,12:42,13:45,1
 
 // ─────────────────────────────────────────────
 // Content Studio
-function ContentStudio({ influencer, onUpdate, onSaveToScripts }) {
+// ─────────────────────────────────────────────
+// Global video mute state — persists across hover sessions
+function getGlobalMuted() { try { return localStorage.getItem('hf_vid_muted') !== 'false' } catch { return true } }
+function saveGlobalMuted(v) {
+  try { localStorage.setItem('hf_vid_muted', v ? 'true' : 'false') } catch {}
+  window.dispatchEvent(new CustomEvent('hf-muted', { detail: v }))
+}
+function useGlobalMuted() {
+  const [muted, setMuted] = useState(getGlobalMuted)
+  useEffect(() => {
+    const handler = (e) => setMuted(e.detail)
+    window.addEventListener('hf-muted', handler)
+    return () => window.removeEventListener('hf-muted', handler)
+  }, [])
+  function toggle() { const next = !muted; setMuted(next); saveGlobalMuted(next) }
+  return [muted, toggle]
+}
+
+// Wardrobe card with hover popup — matches PhotoStudio OutfitCard exactly
+function WardrobeChipWithHover({ slot, active, onClick }) {
+  const cardRef = useRef()
+  const leaveTimer = useRef()
+  const [popup, setPopup] = useState(null)
+
+  function handleEnter() {
+    clearTimeout(leaveTimer.current)
+    if (!cardRef.current || !slot.image) return
+    const r = cardRef.current.getBoundingClientRect()
+    const popW = 600
+    const popH = Math.round(popW * 9 / 16) + 30
+    const left = Math.max(8, Math.min(r.left + r.width / 2 - popW / 2, window.innerWidth - popW - 8))
+    const top = r.top - popH - 8
+    setPopup({ left, top, width: popW })
+  }
+  function handleLeave() { leaveTimer.current = setTimeout(() => setPopup(null), 100) }
+
+  return (
+    <>
+      <button
+        ref={cardRef}
+        onClick={onClick}
+        onMouseEnter={handleEnter}
+        onMouseLeave={handleLeave}
+        style={{ padding: 0, background: 'none', border: 'none', cursor: 'pointer', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 5, flexShrink: 0 }}
+      >
+        <div style={{
+          width: 64, height: 86, borderRadius: 10, overflow: 'hidden',
+          border: `2px solid ${active ? '#8B5CF6' : 'var(--border)'}`,
+          boxShadow: active ? '0 0 0 2px rgba(139,92,246,0.25)' : 'none',
+          background: slot.image ? 'transparent' : 'var(--bg-tertiary)',
+          transition: 'border-color 0.15s, box-shadow 0.15s',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+        }}>
+          {slot.image
+            ? <img src={slot.image} alt={slot.name} style={{ width: '100%', height: '100%', objectFit: 'cover', objectPosition: 'top', display: 'block' }} />
+            : <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--text-secondary)" strokeWidth="1.5" opacity="0.5"><circle cx="12" cy="8" r="3"/><path d="M6 20v-2a6 6 0 0 1 12 0v2"/></svg>
+          }
+        </div>
+        <span style={{ fontSize: 10, fontWeight: active ? 700 : 500, color: active ? '#8B5CF6' : 'var(--text-secondary)', textAlign: 'center', lineHeight: 1.2, minHeight: 28, display: 'flex', alignItems: 'flex-start', justifyContent: 'center' }}>
+          {slot.name}
+        </span>
+      </button>
+
+      {popup && slot.image && createPortal(
+        <div
+          onMouseEnter={() => clearTimeout(leaveTimer.current)}
+          onMouseLeave={handleLeave}
+          style={{
+            position: 'fixed', zIndex: 99999,
+            left: popup.left, top: popup.top, width: popup.width,
+            borderRadius: 10, overflow: 'hidden',
+            boxShadow: '0 12px 36px rgba(0,0,0,0.55), 0 0 0 1px rgba(255,255,255,0.07)',
+            background: 'var(--surface)',
+          }}
+        >
+          <img src={slot.image} alt={slot.name} style={{ width: '100%', aspectRatio: '16/9', objectFit: 'cover', display: 'block' }} />
+          <div style={{ padding: '5px 8px', fontSize: 10, fontWeight: 600, color: 'var(--text-primary)' }}>{slot.name}</div>
+        </div>,
+        document.body
+      )}
+    </>
+  )
+}
+
+// Shared full-screen lightbox — click-to-expand for history cards and strip thumbs
+function MediaLightbox({ entry, onClose, onDownload, onReuse, onDelete, initialTime = 0, autoPlay = false }) {
+  const [muted, toggleMute] = useGlobalMuted()
+  const videoRef = useRef()
+  const isVideo = entry.type === 'video'
+  const [playing, setPlaying] = useState(autoPlay)
+  const [currentTime, setCurrentTime] = useState(initialTime)
+  const [duration, setDuration] = useState(0)
+
+  useEffect(() => {
+    if (!videoRef.current) return
+    videoRef.current.muted = muted
+    videoRef.current.currentTime = initialTime
+    if (autoPlay) videoRef.current.play().catch(() => {})
+  }, [])
+
+  useEffect(() => {
+    if (videoRef.current) videoRef.current.muted = muted
+  }, [muted])
+
+  useEffect(() => {
+    function onKey(e) {
+      if (e.key === 'Escape') onClose()
+      if (e.key === ' ' && isVideo) { e.preventDefault(); togglePlay() }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [onClose, playing])
+
+  function togglePlay() {
+    if (!videoRef.current) return
+    if (videoRef.current.paused) { videoRef.current.play().catch(() => {}); setPlaying(true) }
+    else { videoRef.current.pause(); setPlaying(false) }
+  }
+
+  function fmtTime(s) {
+    const m = Math.floor(s / 60)
+    return `${m}:${String(Math.floor(s % 60)).padStart(2,'0')}`
+  }
+
+  return (
+    <div onClick={onClose} style={{
+      position:'fixed', inset:0, zIndex:9999,
+      background:'rgba(0,0,0,0.88)', backdropFilter:'blur(14px)',
+      display:'flex', alignItems:'center', justifyContent:'center',
+    }}>
+      <button onClick={onClose} style={{
+        position:'fixed', top:20, right:20, width:36, height:36, borderRadius:'50%',
+        background:'rgba(255,255,255,0.12)', color:'#fff', fontSize:18,
+        border:'none', cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center',
+        zIndex:1,
+      }}>×</button>
+      <div onClick={e=>e.stopPropagation()} style={{
+        position:'relative', borderRadius:20, overflow:'hidden',
+        boxShadow:'0 40px 100px rgba(0,0,0,0.9)',
+        background:'#000', maxWidth: isVideo ? 'min(480px, 88vw)' : 'min(680px, 90vw)', maxHeight:'92vh', display:'flex', flexDirection:'column',
+      }}>
+        {isVideo ? (
+          <div style={{position:'relative', cursor:'pointer'}} onClick={togglePlay}>
+            <video ref={videoRef} src={entry.url} muted={muted} playsInline
+              style={{width:'100%', display:'block'}}
+              onTimeUpdate={e => setCurrentTime(e.target.currentTime)}
+              onLoadedMetadata={e => setDuration(e.target.duration)}
+              onEnded={() => setPlaying(false)}
+            />
+            {/* Play/pause overlay — only show when paused */}
+            {!playing && (
+              <div style={{position:'absolute',inset:0,display:'flex',alignItems:'center',justifyContent:'center',background:'rgba(0,0,0,0.25)'}}>
+                <div style={{width:52,height:52,borderRadius:'50%',background:'rgba(0,0,0,0.55)',backdropFilter:'blur(6px)',display:'flex',alignItems:'center',justifyContent:'center',border:'1.5px solid rgba(255,255,255,0.2)'}}>
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="#fff"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+                </div>
+              </div>
+            )}
+            {/* Player controls bar */}
+            <div onClick={e=>e.stopPropagation()} style={{
+              position:'absolute', bottom:0, left:0, right:0,
+              background:'linear-gradient(to top, rgba(0,0,0,0.75) 0%, transparent 100%)',
+              padding:'18px 10px 10px',
+              display:'flex', flexDirection:'column', gap:5,
+            }}>
+              {/* Seekbar */}
+              <input type="range" min={0} max={duration || 1} step={0.05} value={currentTime}
+                onChange={e => { const t = Number(e.target.value); if (videoRef.current) videoRef.current.currentTime = t; setCurrentTime(t) }}
+                style={{ width:'100%', accentColor:'#EC4899', cursor:'pointer', height:3 }}
+              />
+              {/* Controls row */}
+              <div style={{display:'flex', alignItems:'center', gap:8}}>
+                <button onClick={togglePlay} style={{width:28,height:28,borderRadius:'50%',background:'rgba(255,255,255,0.15)',border:'none',cursor:'pointer',display:'flex',alignItems:'center',justifyContent:'center',color:'#fff',flexShrink:0}}>
+                  {playing
+                    ? <svg width="10" height="10" viewBox="0 0 24 24" fill="#fff"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg>
+                    : <svg width="10" height="10" viewBox="0 0 24 24" fill="#fff"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+                  }
+                </button>
+                <span style={{fontSize:10,color:'rgba(255,255,255,0.7)',fontVariantNumeric:'tabular-nums',flexShrink:0}}>
+                  {fmtTime(currentTime)} / {fmtTime(duration)}
+                </span>
+                <div style={{flex:1}}/>
+                <button onClick={e=>{e.stopPropagation(); toggleMute()}} style={{width:28,height:28,borderRadius:'50%',background:'rgba(255,255,255,0.15)',border:'none',cursor:'pointer',display:'flex',alignItems:'center',justifyContent:'center',color:'#fff',flexShrink:0}}>
+                  {muted
+                    ? <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><line x1="23" y1="9" x2="17" y2="15"/><line x1="17" y1="9" x2="23" y2="15"/></svg>
+                    : <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/></svg>
+                  }
+                </button>
+              </div>
+            </div>
+          </div>
+        ) : (
+          <img src={entry.url} alt={entry.label}
+            style={{width:'100%', display:'block', objectFit:'contain', maxHeight:'80vh'}}/>
+        )}
+        <div style={{padding:'10px 12px', display:'flex', gap:8, background:'var(--surface)'}}>
+          {onDownload && (
+            <button onClick={e=>{e.stopPropagation(); onDownload()}} style={{
+              flex:1, padding:'9px', borderRadius:10, fontSize:12, fontWeight:700,
+              border:'none', cursor:'pointer', fontFamily:'inherit',
+              background:'linear-gradient(135deg,#EC4899,#8B5CF6)', color:'#fff',
+            }}>Download</button>
+          )}
+          {onReuse && (
+            <button onClick={e=>{e.stopPropagation(); onReuse()}} style={{
+              flex:1, padding:'9px', borderRadius:10, fontSize:12, fontWeight:700,
+              border:'none', cursor:'pointer', fontFamily:'inherit',
+              background:'rgba(139,92,246,0.12)', color:'#8B5CF6',
+            }}>↺ Reuse</button>
+          )}
+          {onDelete && (
+            <button onClick={e=>{e.stopPropagation(); onDelete(); onClose()}} style={{
+              flex:1, padding:'9px', borderRadius:10, fontSize:12, fontWeight:600,
+              border:'none', cursor:'pointer', fontFamily:'inherit',
+              background:'rgba(255,59,48,0.08)', color:'#FF3B30',
+            }}>Delete</button>
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// Generation history tab
+function HistoryCard({ entry, onDelete, onDownload, isSelected, onSelect, showSelect, onReuse }) {
+  const [hovered, setHovered] = useState(false)
+  const [lightbox, setLightbox] = useState(false)
+  const [lightboxTime, setLightboxTime] = useState(0)
+  const [muted, toggleMute] = useGlobalMuted()
+  const videoRef = useRef()
+  const isVideo = entry.type === 'video'
+  const dateStr = new Date(entry.date).toLocaleDateString([], { month: 'short', day: 'numeric' })
+
+  function openLightbox() {
+    const t = videoRef.current ? videoRef.current.currentTime : 0
+    if (videoRef.current) videoRef.current.pause()
+    setLightboxTime(t)
+    setLightbox(true)
+  }
+
+  useEffect(() => {
+    if (videoRef.current) videoRef.current.muted = muted
+  }, [muted])
+
+  function handleEnter() {
+    setHovered(true)
+    if (videoRef.current) {
+      videoRef.current.muted = getGlobalMuted()
+      videoRef.current.currentTime = 0
+      videoRef.current.play().catch(() => {})
+    }
+  }
+
+  function handleLeave() {
+    setHovered(false)
+    if (videoRef.current) { videoRef.current.pause(); videoRef.current.currentTime = 0 }
+  }
+
+  return (
+    <>
+      <div
+        onMouseEnter={handleEnter}
+        onMouseLeave={handleLeave}
+        onClick={() => openLightbox()}
+        style={{
+          position:'relative', borderRadius:10, overflow:'hidden', background:'var(--bg-tertiary)',
+          outline: isSelected ? '2px solid var(--accent)' : 'none',
+          outlineOffset: -2,
+          cursor: 'pointer',
+          transition: 'transform 0.18s cubic-bezier(0.34,1.56,0.64,1), box-shadow 0.18s',
+          transform: hovered ? 'scale(1.06)' : 'scale(1)',
+          boxShadow: hovered ? '0 12px 32px rgba(0,0,0,0.25)' : 'none',
+          zIndex: hovered ? 10 : 1,
+        }}>
+        <div style={{position:'relative', width:'100%', aspectRatio: isVideo ? '9/16' : '3/4', overflow:'hidden'}}>
+          {isVideo
+            ? <video ref={videoRef} src={entry.url} preload="metadata" muted playsInline
+                style={{width:'100%', height:'100%', objectFit:'cover', display:'block'}}/>
+            : <img src={entry.url} alt={entry.label}
+                style={{width:'100%', height:'100%', objectFit:'cover', display:'block'}}/>
+          }
+          {isVideo && !hovered && (
+            <div style={{position:'absolute', inset:0, display:'flex', alignItems:'center', justifyContent:'center', background:'rgba(0,0,0,0.22)', pointerEvents:'none'}}>
+              <div style={{width:34, height:34, borderRadius:'50%', background:'linear-gradient(135deg,#EC4899,#8B5CF6)', display:'flex', alignItems:'center', justifyContent:'center', fontSize:13, paddingLeft:3, color:'#fff', boxShadow:'0 2px 10px rgba(139,92,246,0.5)'}}>▶</div>
+            </div>
+          )}
+          {!isVideo && hovered && (
+            <div style={{position:'absolute',inset:0,display:'flex',alignItems:'center',justifyContent:'center',background:'rgba(0,0,0,0.28)',pointerEvents:'none',transition:'opacity 0.15s'}}>
+              <div style={{display:'flex',flexDirection:'column',alignItems:'center',gap:5}}>
+                <div style={{width:36,height:36,borderRadius:'50%',background:'linear-gradient(135deg,#EC4899,#8B5CF6)',display:'flex',alignItems:'center',justifyContent:'center',boxShadow:'0 2px 10px rgba(139,92,246,0.5)'}}>
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/><line x1="11" y1="8" x2="11" y2="14"/><line x1="8" y1="11" x2="14" y2="11"/></svg>
+                </div>
+                <button
+                  onClick={e=>{e.stopPropagation(); onDownload()}}
+                  style={{padding:'3px 10px',borderRadius:980,fontSize:11,fontWeight:600,background:'rgba(0,0,0,0.55)',color:'#fff',border:'1px solid rgba(255,255,255,0.2)',cursor:'pointer',backdropFilter:'blur(4px)',fontFamily:'inherit'}}>
+                  ↓ Download
+                </button>
+              </div>
+            </div>
+          )}
+          {isVideo && hovered && (
+            <button onClick={e=>{e.stopPropagation(); toggleMute()}} style={{
+              position:'absolute', top:6, right:6, width:26, height:26, borderRadius:'50%',
+              background:'rgba(0,0,0,0.58)', backdropFilter:'blur(4px)',
+              border:'none', display:'flex', alignItems:'center', justifyContent:'center',
+              fontSize:11, cursor:'pointer', color:'#fff',
+            }}>{muted
+            ? <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><line x1="23" y1="9" x2="17" y2="15"/><line x1="17" y1="9" x2="23" y2="15"/></svg>
+            : <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/></svg>
+          }</button>
+          )}
+          {(hovered || showSelect || isSelected) && (
+            <button onClick={e=>{e.stopPropagation(); onSelect()}} style={{
+              position:'absolute', top:6, left:6, width:22, height:22, borderRadius:'50%',
+              background: isSelected ? 'var(--accent)' : 'rgba(0,0,0,0.5)',
+              border: `2px solid ${isSelected ? 'var(--accent)' : 'rgba(255,255,255,0.5)'}`,
+              display:'flex', alignItems:'center', justifyContent:'center',
+              fontSize:11, color:'#fff', fontWeight:700, cursor:'pointer',
+              backdropFilter:'blur(4px)',
+            }}>{isSelected ? '✓' : ''}</button>
+          )}
+        </div>
+        <div style={{padding:'6px 8px'}}>
+          <div style={{fontSize:11, fontWeight:600, color:'var(--text-primary)', whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis'}}>{entry.label}</div>
+          <div style={{fontSize:10, color:'var(--text-tertiary)', marginTop:1}}>{dateStr}</div>
+        </div>
+      </div>
+
+      {lightbox && (
+        <MediaLightbox
+          entry={entry}
+          onClose={() => setLightbox(false)}
+          onDownload={onDownload}
+          onReuse={onReuse ? () => onReuse(entry.settings ?? null) : null}
+          onDelete={() => { onDelete(); setLightbox(false) }}
+          initialTime={lightboxTime}
+          autoPlay={isVideo}
+        />
+      )}
+    </>
+  )
+}
+
+const PHOTO_STUDIO_HISTORY_KEY = 'photo_studio_history'
+
+function HistoryTab({ influencer, onUpdate, onReuseSettings }) {
+  const [segment, setSegment] = useState('photos')
+  const [selected, setSelected] = useState(new Set())
+
+  // Photo Studio — from localStorage, filtered by this influencer
+  const [photoEntries, setPhotoEntries] = useState(() => {
+    try {
+      return JSON.parse(localStorage.getItem(PHOTO_STUDIO_HISTORY_KEY) || '[]')
+        .filter(h => h.influencerId === influencer.id)
+    } catch { return [] }
+  })
+
+  // Re-read when influencer changes
+  useEffect(() => {
+    try {
+      setPhotoEntries(
+        JSON.parse(localStorage.getItem(PHOTO_STUDIO_HISTORY_KEY) || '[]')
+          .filter(h => h.influencerId === influencer.id)
+      )
+    } catch {}
+    setSelected(new Set())
+  }, [influencer.id])
+
+  // Content Studio — only videos from generationHistory
+  const videoEntries = (influencer.generationHistory || []).filter(e => e.type === 'video')
+
+  const entries = segment === 'photos' ? photoEntries : videoEntries
+  const selecting = selected.size > 0
+
+  function toggle(key) {
+    setSelected(s => { const n = new Set(s); n.has(key) ? n.delete(key) : n.add(key); return n })
+  }
+
+  function deleteEntry(entry) {
+    if (segment === 'photos') {
+      try {
+        const all = JSON.parse(localStorage.getItem(PHOTO_STUDIO_HISTORY_KEY) || '[]')
+        const next = all.filter(h => h.url !== entry.url || h.createdAt !== entry.createdAt)
+        localStorage.setItem(PHOTO_STUDIO_HISTORY_KEY, JSON.stringify(next))
+        setPhotoEntries(next.filter(h => h.influencerId === influencer.id))
+      } catch {}
+    } else {
+      onUpdate({ generationHistory: (influencer.generationHistory || []).filter(e => e.id !== entry.id) })
+    }
+    setSelected(s => { const n = new Set(s); n.delete(entry.url); return n })
+  }
+
+  function deleteSelected() {
+    if (segment === 'photos') {
+      try {
+        const keys = selected
+        const all = JSON.parse(localStorage.getItem(PHOTO_STUDIO_HISTORY_KEY) || '[]')
+        const next = all.filter(h => !(h.influencerId === influencer.id && keys.has(h.url)))
+        localStorage.setItem(PHOTO_STUDIO_HISTORY_KEY, JSON.stringify(next))
+        setPhotoEntries(next.filter(h => h.influencerId === influencer.id))
+      } catch {}
+    } else {
+      const keys = selected
+      onUpdate({ generationHistory: (influencer.generationHistory || []).filter(e => !keys.has(e.id)) })
+    }
+    setSelected(new Set())
+  }
+
+  async function downloadEntry(entry) {
+    const isVideo = entry.type === 'video'
+    const ext = isVideo ? 'mp4' : 'jpg'
+    const label = entry.label || entry.location || 'photo'
+    const filename = `${label.replace(/\s+/g,'-').toLowerCase()}-${Date.now()}.${ext}`
+    try {
+      const res = await fetch(entry.url)
+      const blob = await res.blob()
+      const blobUrl = URL.createObjectURL(blob)
+      const a = document.createElement('a'); a.href = blobUrl; a.download = filename; a.click()
+      setTimeout(() => URL.revokeObjectURL(blobUrl), 60000)
+    } catch {
+      const a = document.createElement('a'); a.href = entry.url; a.download = filename; a.target = '_blank'; a.click()
+    }
+  }
+
+  function downloadSelected() {
+    entries.filter(e => selected.has(segment === 'photos' ? e.url : e.id)).forEach(downloadEntry)
+  }
+
+  function handleReuse(settings) {
+    if (!settings) { onReuseSettings?.(segment); return }
+    const key = segment === 'photos' ? `ps_restore_pending_${influencer.id}` : `hf_restore_pending_${influencer.id}`
+    try { localStorage.setItem(key, JSON.stringify(settings)) } catch {}
+    onReuseSettings?.(segment)
+  }
+
+  // Normalise photo entry for HistoryCard
+  function normalizePhoto(h, idx) {
+    return {
+      id: `ps_${h.createdAt}_${idx}`,
+      _url_key: h.url,           // used as selection key for photos
+      type: 'image',
+      label: [h.location, h.timeOfDay].filter(Boolean).join(' · '),
+      url: h.url,
+      date: h.createdAt,
+      aspectRatio: h.aspectRatio,
+      settings: h.settings ?? null,
+      _raw: h,
+    }
+  }
+
+  const visibleEntries = segment === 'photos'
+    ? photoEntries.map(normalizePhoto)
+    : videoEntries
+
+  const total = visibleEntries.length
+
+  return (
+    <>
+      {/* Segment switcher */}
+      <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:18,flexWrap:'wrap'}}>
+        <div style={{display:'flex',gap:0,background:'var(--bg-tertiary)',borderRadius:10,padding:3}}>
+          {[['photos','📸 Photos'],['videos','🎬 Videos']].map(([s,label])=>(
+            <button key={s} onClick={()=>{setSegment(s);setSelected(new Set())}} style={{
+              padding:'7px 18px',borderRadius:8,fontSize:13,fontWeight:600,border:'none',cursor:'pointer',fontFamily:'inherit',
+              background: segment===s ? 'var(--surface)' : 'transparent',
+              color: segment===s ? 'var(--text-primary)' : 'var(--text-tertiary)',
+              boxShadow: segment===s ? '0 1px 6px rgba(0,0,0,0.10),0 0 0 1px var(--border-subtle)' : 'none',
+              transition:'all 0.15s',
+            }}>{label}</button>
+          ))}
+        </div>
+
+        {/* Selection actions */}
+        {selecting && (<>
+          <span style={{fontSize:12,fontWeight:600,color:'var(--text-secondary)',marginLeft:4}}>{selected.size} selected</span>
+          <button onClick={downloadSelected} style={{
+            padding:'5px 12px',borderRadius:8,fontSize:12,fontWeight:600,border:'none',cursor:'pointer',fontFamily:'inherit',
+            background:'var(--bg-tertiary)',color:'var(--text-secondary)',
+          }}>↓ Download</button>
+          <button onClick={deleteSelected} style={{
+            padding:'5px 12px',borderRadius:8,fontSize:12,fontWeight:600,border:'none',cursor:'pointer',fontFamily:'inherit',
+            background:'rgba(255,59,48,0.1)',color:'#FF3B30',
+          }}>Delete</button>
+          <button onClick={()=>setSelected(new Set())} style={{
+            padding:'5px 8px',borderRadius:8,fontSize:12,fontWeight:500,border:'none',cursor:'pointer',fontFamily:'inherit',
+            background:'transparent',color:'var(--text-tertiary)',
+          }}>Cancel</button>
+        </>)}
+
+        <div style={{flex:1}}/>
+        <span style={{fontSize:11,color:'var(--text-tertiary)'}}>{total} item{total!==1?'s':''}</span>
+      </div>
+
+      {/* Empty state */}
+      {total === 0 && (
+        <div style={{textAlign:'center',padding:'52px 20px',color:'var(--text-tertiary)'}}>
+          <div style={{fontSize:28,marginBottom:10,opacity:0.25}}>{segment==='photos'?'📸':'🎬'}</div>
+          <div style={{fontSize:14,fontWeight:600,color:'var(--text-secondary)',marginBottom:5}}>No {segment==='photos'?'photos':'videos'} yet</div>
+          <div style={{fontSize:12,lineHeight:1.6}}>
+            {segment==='photos'
+              ? 'Generate photos in the Photos tab to see them here.'
+              : 'Generated videos from the Videos tab appear here.'}
+          </div>
+        </div>
+      )}
+
+      {/* Grid */}
+      {total > 0 && (
+        <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(148px,1fr))',gap:10}}>
+          {visibleEntries.map(entry => {
+            const selKey = segment === 'photos' ? entry._url_key : entry.id
+            return (
+              <HistoryCard
+                key={entry.id}
+                entry={entry}
+                showSelect={selecting}
+                isSelected={selected.has(selKey)}
+                onSelect={() => toggle(selKey)}
+                onDelete={() => deleteEntry(segment === 'photos' ? entry._raw : entry)}
+                onDownload={() => downloadEntry(entry)}
+                onReuse={handleReuse}
+              />
+            )
+          })}
+        </div>
+      )}
+    </>
+  )
+}
+
+// Module-level tracker — only one strip popup visible at a time
+let _clearActiveStripPopup = null
+
+function VideoStripThumb({ entry, onReuse, onDelete, isSelected, onToggle }) {
+  const [hovered, setHovered] = useState(false)
+  const [lightbox, setLightbox] = useState(false)
+  const [lightboxTime, setLightboxTime] = useState(0)
+  const [muted, toggleMute] = useGlobalMuted()
+  const thumbRef = useRef()
+  const popupVideoRef = useRef()
+  const leaveTimer = useRef()
+  const [popup, setPopup] = useState(null)
+
+  function openLightbox() {
+    const t = popupVideoRef.current ? popupVideoRef.current.currentTime : 0
+    if (popupVideoRef.current) popupVideoRef.current.pause()
+    setLightboxTime(t)
+    setLightbox(true)
+  }
+
+  useEffect(() => {
+    if (popupVideoRef.current) popupVideoRef.current.muted = muted
+  }, [muted])
+
+  useEffect(() => {
+    if (popup && popupVideoRef.current) {
+      popupVideoRef.current.muted = getGlobalMuted()
+      popupVideoRef.current.play().catch(() => {})
+    }
+  }, [!!popup])
+
+  async function download(e) {
+    if (e) e.stopPropagation()
+    const filename = `video-${new Date(entry.date).toISOString().slice(0,10)}.mp4`
+    try {
+      const res = await fetch(entry.url); const blob = await res.blob()
+      const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = filename; a.click()
+    } catch { const a = document.createElement('a'); a.href = entry.url; a.download = filename; a.target='_blank'; a.click() }
+  }
+
+  function clearPopup() {
+    clearTimeout(leaveTimer.current)
+    setHovered(false)
+    setPopup(null)
+    if (popupVideoRef.current) popupVideoRef.current.pause()
+  }
+
+  function handleEnter() {
+    clearTimeout(leaveTimer.current)
+    // Instantly dismiss any other open strip popup
+    if (_clearActiveStripPopup) { _clearActiveStripPopup(); _clearActiveStripPopup = null }
+    _clearActiveStripPopup = clearPopup
+    setHovered(true)
+    if (!thumbRef.current) return
+    const r = thumbRef.current.getBoundingClientRect()
+    const popW = 200
+    const left = Math.max(8, Math.min(r.left + r.width / 2 - popW / 2, window.innerWidth - popW - 8))
+    const popH = popW * 16 / 9 + 80
+    const top = r.top > popH + 12 ? r.top - popH - 6 : r.bottom + 6
+    setPopup({ left, top, width: popW })
+  }
+
+  function handleLeave() {
+    leaveTimer.current = setTimeout(() => {
+      clearPopup()
+      if (_clearActiveStripPopup === clearPopup) _clearActiveStripPopup = null
+    }, 200)
+  }
+
+  return (
+    <>
+      <div ref={thumbRef} onMouseEnter={handleEnter} onMouseLeave={handleLeave}
+        onClick={e => { if (onToggle) { onToggle(); } else { openLightbox() } }}
+        onDoubleClick={() => openLightbox()}
+        style={{ flexShrink:0, width:60, borderRadius:9, overflow:'hidden', cursor:'pointer', position:'relative',
+          outline: isSelected ? '2.5px solid #8B5CF6' : hovered ? '2px solid rgba(139,92,246,0.4)' : '2px solid transparent',
+        }}>
+        {isSelected && (
+          <div style={{position:'absolute',top:4,left:4,zIndex:2,width:16,height:16,borderRadius:'50%',background:'#8B5CF6',display:'flex',alignItems:'center',justifyContent:'center',boxShadow:'0 1px 4px rgba(0,0,0,0.4)'}}>
+            <svg width="9" height="9" viewBox="0 0 10 8" fill="none"><polyline points="1,4 4,7 9,1" stroke="#fff" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/></svg>
+          </div>
+        )}
+        <video src={entry.url} preload="metadata" muted playsInline style={{width:'100%',height:90,objectFit:'cover',display:'block'}}/>
+        <div style={{position:'absolute',inset:0,display:'flex',alignItems:'center',justifyContent:'center',background: isSelected ? 'rgba(139,92,246,0.18)' : 'rgba(0,0,0,0.18)'}}>
+          <div style={{width:22,height:22,borderRadius:'50%',background:'linear-gradient(135deg,#EC4899,#8B5CF6)',display:'flex',alignItems:'center',justifyContent:'center',fontSize:9,paddingLeft:2,color:'#fff',boxShadow:'0 2px 8px rgba(139,92,246,0.45)'}}>▶</div>
+        </div>
+        <div style={{padding:'4px 6px',fontSize:9,color:'var(--text-tertiary)',fontWeight:500,background:'var(--surface)'}}>
+          {new Date(entry.date).toLocaleDateString([],{month:'short',day:'numeric'})}
+        </div>
+      </div>
+
+      {popup && (
+        <div
+          onMouseEnter={()=>{ clearTimeout(leaveTimer.current); setHovered(true) }}
+          onMouseLeave={handleLeave}
+          onClick={() => openLightbox()}
+          style={{
+            position:'fixed', zIndex:9998,
+            left:popup.left, top:popup.top, width:popup.width,
+            borderRadius:16, overflow:'hidden',
+            boxShadow:'0 24px 64px rgba(0,0,0,0.6), 0 0 0 1px rgba(255,255,255,0.08)',
+            background:'var(--surface)', cursor:'pointer',
+          }}>
+          <div style={{position:'relative'}}>
+            <video ref={popupVideoRef} src={entry.url} muted playsInline
+              style={{width:'100%', display:'block', background:'#000'}}/>
+            <button onClick={e=>{e.stopPropagation(); toggleMute()}} style={{
+              position:'absolute', top:8, right:8, width:28, height:28, borderRadius:'50%',
+              background:'rgba(0,0,0,0.58)', backdropFilter:'blur(4px)',
+              border:'none', display:'flex', alignItems:'center', justifyContent:'center',
+              fontSize:12, cursor:'pointer', color:'#fff',
+            }}>{muted
+            ? <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><line x1="23" y1="9" x2="17" y2="15"/><line x1="17" y1="9" x2="23" y2="15"/></svg>
+            : <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/></svg>
+          }</button>
+          </div>
+          <div style={{padding:'7px 8px', display:'flex', gap:5}}>
+            <button onClick={download} title="Download" style={{flex:1,padding:'6px 0',borderRadius:8,fontSize:13,border:'none',cursor:'pointer',fontFamily:'inherit',background:'linear-gradient(135deg,#EC4899,#8B5CF6)',color:'#fff'}}>↓</button>
+            {onReuse && (
+              <button onClick={e=>{e.stopPropagation(); onReuse(entry); clearPopup(); if(_clearActiveStripPopup===clearPopup) _clearActiveStripPopup=null}} title="Reuse settings" style={{flex:1,padding:'6px 0',borderRadius:8,fontSize:13,border:'none',cursor:'pointer',fontFamily:'inherit',background:'rgba(139,92,246,0.12)',color:'#8B5CF6'}}>↺</button>
+            )}
+            {onDelete && (
+              <button onClick={e=>{e.stopPropagation(); onDelete(); clearPopup(); if(_clearActiveStripPopup===clearPopup) _clearActiveStripPopup=null}} title="Delete" style={{flex:1,padding:'6px 0',borderRadius:8,fontSize:13,border:'none',cursor:'pointer',fontFamily:'inherit',background:'rgba(255,59,48,0.08)',color:'#FF3B30'}}>×</button>
+            )}
+          </div>
+        </div>
+      )}
+
+      {lightbox && (
+        <MediaLightbox
+          entry={{...entry, type:'video'}}
+          onClose={() => setLightbox(false)}
+          onDownload={download}
+          onReuse={onReuse ? () => { onReuse(entry); setLightbox(false) } : null}
+          onDelete={onDelete ? () => { onDelete(); setLightbox(false) } : null}
+          initialTime={lightboxTime}
+          autoPlay
+        />
+      )}
+    </>
+  )
+}
+
+function ContentStudio({ influencer, onUpdate, onSaveToScripts, onGenerated, restoreKey = 0, pendingStartFrame = null, onStartFrameConsumed }) {
   const allImages = [
     { key: 'mainImage',          label: 'Main',          url: influencer.mainImage },
     { key: 'characterSheetImage',label: 'Character Sheet',url: influencer.characterSheetImage },
@@ -2702,36 +3714,42 @@ function ContentStudio({ influencer, onUpdate, onSaveToScripts }) {
   const [productRef1, setProductRef1] = useState(() => { try { return localStorage.getItem(`hf_product_ref_1_${influencer.id}`) || null } catch { return null } })
   const [productRef2, setProductRef2] = useState(() => { try { return localStorage.getItem(`hf_product_ref_2_${influencer.id}`) || null } catch { return null } })
   const [productRef3, setProductRef3] = useState(() => { try { return localStorage.getItem(`hf_product_ref_3_${influencer.id}`) || null } catch { return null } })
-  const [productWorn, setProductWorn] = useState(() => localStorage.getItem('hf_product_worn') === '1')
+  const [productWorn, setProductWorn] = useState(() => { try { return JSON.parse(localStorage.getItem(`cs_settings_${influencer.id}`) || '{}').productWorn ?? false } catch { return false } })
+  const [dealPopup, setDealPopup] = useState(null)
+  const [dealViewSheet, setDealViewSheet] = useState({})
   const [dragOver1, setDragOver1] = useState(false)
   const [dragOver2, setDragOver2] = useState(false)
   const [dragOver3, setDragOver3] = useState(false)
   const productFileRef1 = useRef()
   const productFileRef2 = useRef()
   const productFileRef3 = useRef()
-  const [dialogue, setDialogue] = useState(() => localStorage.getItem('hf_dialogue') || '')
-  const [envKey, setEnvKey] = useState(() => localStorage.getItem('hf_env_key') || '')
+  const [dialogue, setDialogue] = useState(() => { try { return JSON.parse(localStorage.getItem(`cs_settings_${influencer.id}`) || '{}').dialogue ?? '' } catch { return '' } })
+  const [envKey, setEnvKey] = useState(() => { try { return JSON.parse(localStorage.getItem(`cs_settings_${influencer.id}`) || '{}').envKey ?? '' } catch { return '' } })
   const [environment, setEnvironment] = useState(() => {
-    const k = localStorage.getItem('hf_env_key') || ''
-    return k ? (CS_ENV_PRESETS[k] || k) : (localStorage.getItem('hf_env_custom') || '')
+    try {
+      const s = JSON.parse(localStorage.getItem(`cs_settings_${influencer.id}`) || '{}')
+      const ek = s.envKey ?? ''
+      return ek ? (CS_ENV_PRESETS[ek] || ek) : (s.envCustom ?? '')
+    } catch { return '' }
   })
-  const [camera, setCamera] = useState(() => localStorage.getItem('hf_camera') || 'Handheld')
-  const [vibe, setVibe] = useState(() => localStorage.getItem('hf_vibe') || '')
-  const [voicePreset, setVoicePreset] = useState(() => localStorage.getItem('hf_voice_preset') || '')
-  const [voiceCustom, setVoiceCustom] = useState(() => localStorage.getItem('hf_voice_custom') || '')
+  const [camera, setCamera] = useState(() => { try { return JSON.parse(localStorage.getItem(`cs_settings_${influencer.id}`) || '{}').camera ?? 'Handheld' } catch { return 'Handheld' } })
+  const [vibe, setVibe] = useState(() => { try { return JSON.parse(localStorage.getItem(`cs_settings_${influencer.id}`) || '{}').vibe ?? '' } catch { return '' } })
+  const [voicePreset, setVoicePreset] = useState(() => { try { return JSON.parse(localStorage.getItem(`cs_settings_${influencer.id}`) || '{}').voicePreset ?? '' } catch { return '' } })
+  const [voiceCustom, setVoiceCustom] = useState(() => { try { return JSON.parse(localStorage.getItem(`cs_settings_${influencer.id}`) || '{}').voiceCustom ?? '' } catch { return '' } })
   const [additionalNotes, setAdditionalNotes] = useState('')
   const [audioDataUrl, setAudioDataUrl] = useState(null)
   const [audioFileName, setAudioFileName] = useState('')
   const [audioDuration, setAudioDuration] = useState(null)
   const audioFileRef = useRef()
-  const [duration, setDuration] = useState(() => Number(localStorage.getItem('hf_duration')) || 15)
-  const [aspect, setAspect] = useState(() => localStorage.getItem('hf_aspect') || '9:16')
-  const [outputs, setOutputs] = useState(() => Number(localStorage.getItem('hf_outputs')) || 1)
-  const [resolution, setResolution] = useState(() => localStorage.getItem('hf_resolution') || '1080p')
-  const [shotMode, setShotMode] = useState(() => localStorage.getItem('hf_shot_mode') || 'oner')
+  const [duration, setDuration] = useState(() => { try { return JSON.parse(localStorage.getItem(`cs_settings_${influencer.id}`) || '{}').duration ?? 15 } catch { return 15 } })
+  const [aspect, setAspect] = useState(() => { try { return JSON.parse(localStorage.getItem(`cs_settings_${influencer.id}`) || '{}').aspect ?? '9:16' } catch { return '9:16' } })
+  const [outputs, setOutputs] = useState(() => { try { return JSON.parse(localStorage.getItem(`cs_settings_${influencer.id}`) || '{}').outputs ?? 1 } catch { return 1 } })
+  const [resolution, setResolution] = useState(() => { try { return JSON.parse(localStorage.getItem(`cs_settings_${influencer.id}`) || '{}').resolution ?? '1080p' } catch { return '1080p' } })
+  const [shotMode, setShotMode] = useState(() => { try { return JSON.parse(localStorage.getItem(`cs_settings_${influencer.id}`) || '{}').shotMode ?? 'oner' } catch { return 'oner' } })
   const [saved, setSaved] = useState(false)
   const [saveModal, setSaveModal] = useState(null)
   const [generating, setGenerating] = useState(false)
+  const [lockedOutputs, setLockedOutputs] = useState(1)
   const [genProgress, setGenProgress] = useState(0)
   const [genError, setGenError] = useState(null)
   const [genResults, setGenResults] = useState(() => { try { return JSON.parse(localStorage.getItem(`hf_gen_results_${influencer.id}`) || '[]') } catch { return [] } })
@@ -2746,36 +3764,157 @@ function ContentStudio({ influencer, onUpdate, onSaveToScripts }) {
   const displayProgressRef = useRef(0)
   const genCardRef = useRef(null)
   const cancelRef = useRef(false)
+  const genEpochRef = useRef(0) // incremented at the start of every new generation; lets each loop self-invalidate without sharing cancelRef
+  // Cancel in-flight generation on unmount so hf_pending_videos survives for resume on remount
+  useEffect(() => () => { cancelRef.current = true; clearInterval(elapsedRef.current) }, [])
+  const onGeneratedRef = useRef(onGenerated)
+  useEffect(() => { onGeneratedRef.current = onGenerated }, [onGenerated])
+  const [startFrameUrl, setStartFrameUrl] = useState(() => { try { return localStorage.getItem(`hf_start_frame_${influencer.id}`) || null } catch { return null } })
+  const clearStartFrame = () => { setStartFrameUrl(null); try { localStorage.removeItem(`hf_start_frame_${influencer.id}`) } catch {} }
+  useEffect(() => {
+    if (!pendingStartFrame) return
+    setStartFrameUrl(pendingStartFrame)
+    try { localStorage.setItem(`hf_start_frame_${influencer.id}`, pendingStartFrame) } catch {}
+    onStartFrameConsumed?.()
+  }, [pendingStartFrame])
   const [fullscreenUrl, setFullscreenUrl] = useState(null)
   const [regenSlot, setRegenSlot] = useState(null)
   const [history, setHistory] = useState(() => {
-    try { return JSON.parse(localStorage.getItem('hf_video_history') || '[]') } catch { return [] }
+    try {
+      const raw = JSON.parse(localStorage.getItem(`hf_video_history_${influencer.id}`) || '[]')
+      return raw.map(e => { const c = { ...e }; delete c.productRef1; delete c.productRef2; delete c.productRef3; return c })
+    } catch { return [] }
   })
   const [showHistory, setShowHistory] = useState(false)
+  const [refTip, setRefTip] = useState(false)
+  const [selectedVidIds, setSelectedVidIds] = useState(new Set())
+  const [confirmVidClear, setConfirmVidClear] = useState(null)
+  const restoringRef = useRef(false)
+
+  const CS_DEFAULTS = { vibe: '', duration: 15, aspect: '9:16', outputs: 1, resolution: '1080p', shotMode: 'oner', camera: 'Handheld', envKey: '', envCustom: '', voicePreset: '', voiceCustom: '' }
+  function loadCsSettings(id) { try { return JSON.parse(localStorage.getItem(`cs_settings_${id}`) || '{}') } catch { return {} } }
+
+  useEffect(() => {
+    restoringRef.current = true
+    setSelectedVidIds(new Set())
+    setConfirmVidClear(null)
+    const s = loadCsSettings(influencer.id)
+    setVibe(s.vibe            ?? CS_DEFAULTS.vibe)
+    setDuration(s.duration    ?? CS_DEFAULTS.duration)
+    setAspect(s.aspect        ?? CS_DEFAULTS.aspect)
+    setOutputs(s.outputs      ?? CS_DEFAULTS.outputs)
+    setResolution(s.resolution ?? CS_DEFAULTS.resolution)
+    setShotMode(s.shotMode    ?? CS_DEFAULTS.shotMode)
+    setCamera(s.camera        ?? CS_DEFAULTS.camera)
+    const ek = s.envKey ?? CS_DEFAULTS.envKey
+    setEnvKey(ek)
+    setEnvironment(ek ? (CS_ENV_PRESETS[ek] || ek) : (s.envCustom ?? CS_DEFAULTS.envCustom))
+    setVoicePreset(s.voicePreset ?? CS_DEFAULTS.voicePreset)
+    setVoiceCustom(s.voiceCustom ?? CS_DEFAULTS.voiceCustom)
+    setDialogue(s.dialogue ?? '')
+    setVideoTimeOfDay(s.videoTimeOfDay ?? 'afternoon')
+    setProductWorn(s.productWorn ?? false)
+    try {
+      const raw = JSON.parse(localStorage.getItem(`hf_video_history_${influencer.id}`) || '[]')
+      // Scrub any base64 product refs that were saved by older versions — they bloat localStorage
+      const cleaned = raw.map(e => { const c = { ...e }; delete c.productRef1; delete c.productRef2; delete c.productRef3; return c })
+      setHistory(cleaned)
+      try { localStorage.setItem(`hf_video_history_${influencer.id}`, JSON.stringify(cleaned)) } catch {}
+    } catch {}
+    try { setStartFrameUrl(localStorage.getItem(`hf_start_frame_${influencer.id}`) || null) } catch {} // read only — never writes
+    restoringRef.current = false
+  }, [influencer.id])
+
   const [advanced, setAdvanced] = useState(() => {
     try { return localStorage.getItem('cs_advanced_open') === '1' } catch { return false }
   })
+  const [videoTimeOfDay, setVideoTimeOfDay] = useState(() => { try { return JSON.parse(localStorage.getItem(`cs_settings_${influencer.id}`) || '{}').videoTimeOfDay ?? 'afternoon' } catch { return 'afternoon' } })
   const [selectedWardrobeId, setSelectedWardrobeId] = useState(() => { try { return localStorage.getItem(`hf_wardrobe_id_${influencer.id}`) || '' } catch { return '' } })
   const wardrobeSlots = (influencer.wardrobeSlots || []).filter(s => s.image)
   const selectedWardrobe = wardrobeSlots.find(s => s.id === selectedWardrobeId) || null
+  const [csWardrobeOpen, setCsWardrobeOpen] = useState(false)
+  const [csWardrobePending, setCsWardrobePending] = useState(() => {
+    try { return localStorage.getItem(`wd_result_${influencer?.id}`) || null } catch { return null }
+  })
+
+  function handleCsWardrobeResult(url) {
+    const key = `wd_result_${influencer?.id}`
+    if (url) {
+      try { localStorage.setItem(key, url) } catch {}
+      setCsWardrobePending(url)
+    } else {
+      try { localStorage.removeItem(key) } catch {}
+      setCsWardrobePending(null)
+    }
+  }
   const [selectedHomeId, setSelectedHomeId] = useState(() => { try { return localStorage.getItem(`hf_home_id_${influencer.id}`) || '' } catch { return '' } })
   const homeSlots = (influencer.homeSlots || []).filter(s => s.image)
   const selectedHome = homeSlots.find(s => s.id === selectedHomeId) || null
   const videoModel = 'seedance_2_0'
 
+  // Reset wardrobe drawer state when the active influencer changes
+  useEffect(() => {
+    const id = influencer?.id
+    const pending = id ? (localStorage.getItem(`wd_result_${id}`) || null) : null
+    setCsWardrobePending(pending)
+    setCsWardrobeOpen(false)
+  }, [influencer?.id])
+
+  // Reset UI state when switching influencers so the old generation's state doesn't bleed in
+  useEffect(() => {
+    cancelRef.current = true
+    clearInterval(elapsedRef.current)
+    setGenerating(false)
+    setGenProgress(0)
+    setElapsed(0)
+    setGenResults((() => { try { return JSON.parse(localStorage.getItem(`hf_gen_results_${influencer.id}`) || '[]') } catch { return [] } })())
+    setGenError(null)
+  }, [influencer.id]) // eslint-disable-line
+
+  // One-time migration: if hf_gen_results_* has URLs not yet in generationHistory, add them.
+  // This recovers videos that were generated but lost because the user switched influencers mid-generation.
+  useEffect(() => {
+    try {
+      const saved = JSON.parse(localStorage.getItem(`hf_gen_results_${influencer.id}`) || '[]')
+      if (!saved.length) return
+      const existingUrls = new Set((influencer.generationHistory || []).map(e => e.url))
+      const toAdd = [...new Set(saved.filter(url => url && !existingUrls.has(url)))]
+      if (!toAdd.length) return
+      const now = Date.now()
+      onUpdate({ generationHistory: [
+        ...toAdd.map((url, i) => ({ id: generateId(), type: 'video', label: toAdd.length > 1 ? `Video ${i+1}` : 'Video', url, date: now })),
+        ...(influencer.generationHistory || [])
+      ].slice(0, 300) })
+    } catch {}
+  }, [influencer.id]) // eslint-disable-line
+
   // Resume any video generation that was running when the user left the page
   useEffect(() => {
     const pending = getPendingVideo(influencer.id)
     if (!pending) return
+    const savedOnGenerated = onGeneratedRef.current  // capture before async — stays tied to this influencer even if user switches
     // Ignore if started more than 10 minutes ago (likely stale)
     if (Date.now() - pending.startedAt > 10 * 60 * 1000) { clearPendingVideo(influencer.id); return }
+    // Bump epoch BEFORE resetting cancelRef so any still-running generate() loop self-cancels
+    const myEpoch = ++genEpochRef.current
+    cancelRef.current = false
     setGenerating(true)
     setGenProgress(30)
-    resumeVideoJob(pending.jobIds, pending.count, setGenProgress, partials => { if (!cancelRef.current) persistGenResults([...partials]) }, () => cancelRef.current)
-      .then(result => { if (!cancelRef.current) { persistGenResults(result.urls); setGenShareUrls(result.shareUrls || []) } })
-      .catch(e => { if (!cancelRef.current) setGenError(e.message) })
-      .finally(() => { clearPendingVideo(influencer.id); setGenerating(false) })
-  }, [influencer.id])
+    // Restore elapsed from persisted start time so the timer doesn't reset to 0
+    const savedStart = Number(localStorage.getItem(`hf_gen_start_${influencer.id}`)) || pending.startedAt
+    const alreadyElapsed = Math.floor((Date.now() - savedStart) / 1000)
+    setElapsed(alreadyElapsed)
+    clearInterval(elapsedRef.current)
+    elapsedRef.current = setInterval(() => setElapsed(Math.floor((Date.now() - savedStart) / 1000)), 1000)
+    resumeVideoJob(pending.jobIds, pending.count, setGenProgress, partials => { if (!cancelRef.current && genEpochRef.current === myEpoch) persistGenResults([...partials]) }, () => cancelRef.current || genEpochRef.current !== myEpoch)
+      .then(result => {
+        if (!cancelRef.current && genEpochRef.current === myEpoch) { persistGenResults(result.urls); setGenShareUrls(result.shareUrls || []) }
+        const histUrls = [...new Set(result.urls.filter(Boolean))]
+        if (histUrls.length && genEpochRef.current === myEpoch) savedOnGenerated?.(histUrls, currentSettingsSnapshot())
+      })
+      .catch(e => { if (!cancelRef.current && genEpochRef.current === myEpoch) setGenError(e.message) })
+      .finally(() => { clearPendingVideo(influencer.id); try { localStorage.removeItem(`hf_gen_start_${influencer.id}`) } catch {} clearInterval(elapsedRef.current); if (genEpochRef.current === myEpoch) setGenerating(false) })
+  }, [influencer.id]) // eslint-disable-line
 
   // Smooth fake progress during the render wait (33% → 88% over 8 minutes)
   useEffect(() => {
@@ -2820,6 +3959,30 @@ function ContentStudio({ influencer, onUpdate, onSaveToScripts }) {
   useEffect(() => { try { productRef2 ? localStorage.setItem(`hf_product_ref_2_${influencer.id}`, productRef2) : localStorage.removeItem(`hf_product_ref_2_${influencer.id}`) } catch {} }, [productRef2, influencer.id])
   useEffect(() => { try { productRef3 ? localStorage.setItem(`hf_product_ref_3_${influencer.id}`, productRef3) : localStorage.removeItem(`hf_product_ref_3_${influencer.id}`) } catch {} }, [productRef3, influencer.id])
 
+  // Apply pending settings restore (set by History tab "Reuse Settings" button)
+  useEffect(() => {
+    try {
+      const key = `hf_restore_pending_${influencer.id}`
+      const raw = localStorage.getItem(key)
+      if (raw) { localStorage.removeItem(key); restoreHistory(JSON.parse(raw)) }
+    } catch {}
+  }, [influencer.id, restoreKey])
+
+  function assignProduct(url) {
+    if (!productRef1) { setProductRef1(url) }
+    else if (!productRef2) { setProductRef2(url) }
+    else if (!productRef3) { setProductRef3(url) }
+    else { setProductRef1(url) }
+  }
+
+  // Persist video settings per-influencer whenever they change (skip during restore to avoid writing stale state)
+  useEffect(() => {
+    if (restoringRef.current) return
+    try {
+      localStorage.setItem(`cs_settings_${influencer.id}`, JSON.stringify({ vibe, duration, aspect, outputs, resolution, shotMode, camera, envKey, envCustom: CS_ENV_PRESETS[envKey] ? '' : environment, voicePreset, voiceCustom, dialogue, videoTimeOfDay, productWorn }))
+    } catch {}
+  }, [influencer.id, vibe, duration, aspect, outputs, resolution, shotMode, camera, envKey, environment, voicePreset, voiceCustom, dialogue, videoTimeOfDay, productWorn])
+
   // Persist last prompt per influencer
   useEffect(() => {
     if (!lastGeneratedPrompt) return
@@ -2834,28 +3997,43 @@ function ContentStudio({ influencer, onUpdate, onSaveToScripts }) {
     }
   }
 
+  function currentSettingsSnapshot() {
+    return { dialogue, environment, envKey, camera, vibe, voicePreset, voiceCustom, additionalNotes, duration, aspect, outputs, shotMode, productRef1, productRef2, productRef3, productWorn }
+  }
+
   function buildPrompt() {
     const name = influencer.name
     const phys = influencer.physicalDesc || `${name}, natural confident energy`
+    const isMale = influencer.gender === 'Male'
+    const she = isMale ? 'he' : 'she'
+    const She = isMale ? 'He' : 'She'
+    const her = isMale ? 'him' : 'her'
+    const his = isMale ? 'his' : 'her'
 
     // Build ordered image tag map — influencer refs first, then products
     // Higgsfield assigns @image_N in the order refs are passed to generate_video
-    const infImgs = [
-      influencer.mainImage && { role: 'identity', url: influencer.mainImage },
-      selectedWardrobe
-        ? { role: 'wardrobe',  url: selectedWardrobe.image }
-        : influencer.characterSheetImage && { role: 'charsheet', url: influencer.characterSheetImage },
-      influencer.closeUpImage1 && { role: 'closeup1', url: influencer.closeUpImage1 },
-      influencer.closeUpImage2 && { role: 'closeup2', url: influencer.closeUpImage2 },
-    ].filter(Boolean)
-    const homeImgEntry = selectedHome ? [{ role: 'home', url: selectedHome.image }] : []
     const prodImgs = [
       productRef1 && { role: 'product1', url: productRef1 },
       productRef2 && { role: 'product2', url: productRef2 },
       productRef3 && { role: 'product3', url: productRef3 },
     ].filter(Boolean)
     const tagMap = {}
-    ;[...infImgs, ...homeImgEntry, ...prodImgs].forEach((img, i) => { tagMap[img.role] = `@image_${i + 1}` })
+    if (startFrameUrl) {
+      // Start frame mode: @image_1 = start frame (identity + outfit baked in), @image_2+ = products
+      tagMap['identity'] = '@image_1'
+      prodImgs.forEach((prod, i) => { tagMap[prod.role] = `@image_${i + 2}` })
+    } else {
+      const infImgs = [
+        influencer.mainImage && { role: 'identity', url: influencer.mainImage },
+        selectedWardrobe
+          ? { role: 'wardrobe',  url: selectedWardrobe.image }
+          : influencer.characterSheetImage && { role: 'charsheet', url: influencer.characterSheetImage },
+        influencer.closeUpImage1 && { role: 'closeup1', url: influencer.closeUpImage1 },
+        influencer.closeUpImage2 && { role: 'closeup2', url: influencer.closeUpImage2 },
+      ].filter(Boolean)
+      const homeImgEntry = selectedHome ? [{ role: 'home', url: selectedHome.image }] : []
+      ;[...infImgs, ...homeImgEntry, ...prodImgs].forEach((img, i) => { tagMap[img.role] = `@image_${i + 1}` })
+    }
 
     // Shot count — oner = always 1, multi = auto from duration
     const shotCount = shotMode === 'oner' ? 1 : duration <= 5 ? 1 : duration <= 8 ? 2 : duration <= 12 ? 3 : 4
@@ -2876,20 +4054,24 @@ function ContentStudio({ influencer, onUpdate, onSaveToScripts }) {
     const isHandheld = camera === 'Handheld'
     const wearMode = !!(productRef1 && productWorn)
 
-    // Environment — free text from user input (may be a custom description or a preset)
-    const envDesc = tagMap.home
-      ? `${tagMap.home} for the location and environment setting.${environment ? ' ' + environment : ''}`
-      : environment || (isTalkingHead ? 'in a studio' : 'indoors')
+    // Environment — in start frame mode the scene is locked to the start frame, not the text field
+    const todLabel = { morning: 'morning', afternoon: 'afternoon', 'golden hour': 'golden hour', night: 'night' }[videoTimeOfDay] || ''
+    const todSuffix = todLabel ? `, ${todLabel}` : ''
+    const envDesc = startFrameUrl
+      ? 'Continue from start frame — environment and lighting match @image_1 exactly throughout.'
+      : tagMap.home
+        ? `${tagMap.home} for the location and environment setting.${environment ? ' ' + environment : ''}${todSuffix}`
+        : `${environment || (isTalkingHead ? 'in a studio' : 'indoors')}${todSuffix}`
 
     // Mood arc
     const moodMap = {
       'Natural':   "Delivery is unhurried and conversational — pauses land where they would in real speech, never performed. Micro-expressions are small and honest: a slight mouth pull before a punchline, a brief brow soften on the reveal. Gestures are loose and incidental, not choreographed. Eye contact with the camera is easy, breaks naturally, comes back. Energy stays flat and warm across the whole clip.",
-      'Energetic': "Delivery is fast and forward — she pushes through lines with minimal pause, pace never drops. Eyebrows lift on emphasis words. Gestures are sharp and frequent: quick hand flicks, small head tilts that land on key beats. Body is slightly forward the whole time. Expression resets fast between lines — no lingering. Clip ends on full energy, nothing winds down.",
-      'Luxury':    "Delivery is slow and deliberate — every word has weight, pauses are long and intentional. Micro-expressions are subtle: a slow smirk rather than a smile, heavy-lidded confidence, no wide eyes. Gestures are minimal and controlled — small wrist movements, nothing above the shoulder. She never rushes. Eye contact is held longer than comfortable, then released slowly.",
-      'Playful':   "Delivery has rhythm and bounce — slight sing-song cadence, small upticks at the ends of phrases. Quick genuine smiles that reach the eyes, eyebrow raises on key words. Light shoulder movement on emphasis. Pauses are short and teasing, like she's about to say something and makes you wait one beat. Gestures are small and spirited — pointing, light wrist flick.",
-      'Tutorial':  "Delivery is clear and even-paced — deliberate without being slow, every word lands cleanly. Direct sustained eye contact with the camera, nods on key points. Gestures are demonstrative: she points at or tilts the product on relevant beats, uses open-palm gestures when explaining. Expression stays calm and assured throughout. No uptalk — every sentence lands flat and final.",
+      'Energetic': `Delivery is fast and forward — ${she} pushes through lines with minimal pause, pace never drops. Eyebrows lift on emphasis words. Gestures are sharp and frequent: quick hand flicks, small head tilts that land on key beats. Body is slightly forward the whole time. Expression resets fast between lines — no lingering. Clip ends on full energy, nothing winds down.`,
+      'Luxury':    `Delivery is slow and deliberate — every word has weight, pauses are long and intentional. Micro-expressions are subtle: a slow smirk rather than a smile, heavy-lidded confidence, no wide eyes. Gestures are minimal and controlled — small wrist movements, nothing above the shoulder. ${She} never rushes. Eye contact is held longer than comfortable, then released slowly.`,
+      'Playful':   `Delivery has rhythm and bounce — slight sing-song cadence, small upticks at the ends of phrases. Quick genuine smiles that reach the eyes, eyebrow raises on key words. Light shoulder movement on emphasis. Pauses are short and teasing, like ${she}'s about to say something and makes you wait one beat. Gestures are small and spirited — pointing, light wrist flick.`,
+      'Tutorial':  `Delivery is clear and even-paced — deliberate without being slow, every word lands cleanly. Direct sustained eye contact with the camera, nods on key points. Gestures are demonstrative: ${she} points at or tilts the product on relevant beats, uses open-palm gestures when explaining. Expression stays calm and assured throughout. No uptalk — every sentence lands flat and final.`,
       'Dramatic':  "Delivery is slow-building — early lines are quiet and measured, pace tightens toward the end. Strategic pauses that hold one beat longer than expected. Eyes stay on camera longer than normal, expression shifts are controlled and deliberate. Gestures are restrained — hands stay low, movement is minimal until the payoff line. The reveal lands with full stillness.",
-      'Cozy':      "Delivery is soft and low-energy — she sounds like she's talking to one person, not a camera. Slight smile throughout, never fades completely. Minimal gestures, hands stay relaxed. Pauses feel comfortable, not empty. Eye contact is warm and personal. Pace is slow enough that every word registers. Expression stays gentle from first frame to last.",
+      'Cozy':      `Delivery is soft and low-energy — ${she} sounds like ${she}'s talking to one person, not a camera. Slight smile throughout, never fades completely. Minimal gestures, hands stay relaxed. Pauses feel comfortable, not empty. Eye contact is warm and personal. Pace is slow enough that every word registers. Expression stays gentle from first frame to last.`,
       'Confident': "Delivery is even and controlled — no uptalk, no filler energy, every line lands flat and sure. Holds eye contact with the camera without excess blinking. Gestures are purposeful and limited — one clean move per beat, nothing nervous or decorative. Expression is neutral-warm: not performing happiness, just completely at ease. Pace stays consistent, never rushes the reveal.",
     }
     const moodArc = vibe ? (moodMap[vibe] || vibe) : 'Delivery is genuine and present throughout. Micro-expressions are honest and small. Gestures are natural and uncontrived.'
@@ -2914,15 +4096,35 @@ function ContentStudio({ influencer, onUpdate, onSaveToScripts }) {
     // Parse notes first so action beats can be woven into annotateDialogue
     const { actionBeats, directionNotes } = parseAdditionalNotes(additionalNotes, duration)
 
-    const annotatedDialogue = annotateDialogue(fullDialogue, prod1Tag, duration, isHandheld, wearMode, actionBeats)
+    const annotatedDialogue = annotateDialogue(fullDialogue, prod1Tag, duration, isHandheld, wearMode, actionBeats, she, her, his)
     // For multi-shot: distribute raw sentences across shots
     const dialogueLines = fullDialogue ? fullDialogue.split(/(?<=[.!?])\s+/).filter(s=>s.trim()) : []
 
-    // Product logic rules (use actual computed tag indices)
+    // Product logic rules (belt+suspenders reference alongside PRODUCT section)
     const productRules = []
-    if (tagMap.product1) productRules.push(`${tagMap.product1} is the product — same object every frame, same color, label position, and size. Never substituted. ${tagMap.product1} contributes ONLY the product — never the face, identity, or wardrobe.${wearMode ? ` ${tagMap.product1} is WORN — never held. She naturally interacts with it once or twice — a brief touch or glance — without overdoing it.` : ''}`)
-    if (tagMap.product2) productRules.push(`${tagMap.product2} is the second product — same consistency rules apply.`)
-    if (tagMap.product3) productRules.push(`${tagMap.product3} is the third product — same consistency rules apply.`)
+    if (tagMap.product1) productRules.push(`${tagMap.product1} is always the same object — same color, label position, and size. Never substituted.${wearMode ? ` ${tagMap.product1} is WORN — never held. ${She} naturally interacts with it once or twice — a brief touch or glance — without overdoing it.` : ''}`)
+    if (tagMap.product2) productRules.push(`${tagMap.product2} is always the same object — never substituted.`)
+    if (tagMap.product3) productRules.push(`${tagMap.product3} is always the same object — never substituted.`)
+
+    // PRODUCT section — dedicated block placed between WARDROBE and ENVIRONMENT
+    const prodEntries = [
+      tagMap.product1 && { tag: tagMap.product1, n: 1 },
+      tagMap.product2 && { tag: tagMap.product2, n: 2 },
+      tagMap.product3 && { tag: tagMap.product3, n: 3 },
+    ].filter(Boolean)
+    let productSection = ''
+    if (prodEntries.length > 0) {
+      const pLines = ['PRODUCT:']
+      pLines.push('')
+      prodEntries.forEach(({ tag, n }) => {
+        pLines.push(`${tag} — product reference ${n}. Use as the exact source for this product's color, shape, label text and orientation, and proportions.`)
+      })
+      pLines.push('')
+      const allProdTags = prodEntries.map(e => e.tag).join(' and ')
+      pLines.push(`The product must appear identical in every frame — same label text and orientation, same colors, same proportions throughout. Never substituted, recolored, or modified. ${allProdTags} ${prodEntries.length > 1 ? 'contribute' : 'contributes'} ONLY the product — never the face, identity, wardrobe, environment, or color grade.`)
+      if (wearMode) pLines.push(`Exception: ${tagMap.product1} is WORN — ${she} interacts with it naturally once or twice — a brief touch or glance — without overdoing it.`)
+      productSection = pLines.join('\n')
+    }
 
     // Build shots
     const shotDurs = shotCount === 1 ? [duration]
@@ -2941,34 +4143,45 @@ function ContentStudio({ influencer, onUpdate, onSaveToScripts }) {
       const ts = `0:${String(t).padStart(2,'0')} to 0:${String(te).padStart(2,'0')}`
 
       if (shotMode === 'oner') {
-        const action = annotatedDialogue || `@image_1 faces camera. Eyes on lens at 0:00.`
-        shots.push(`ACTION:\n0:00 to 0:${String(duration).padStart(2,'0')} — ${framing}, ${lens}, ${move}. One continuous take.\n\n${action} Natural conversational gestures as she speaks. End cleanly with the character holding a final pose, no talking or lip movement.`)
+        const startPin = startFrameUrl ? `Video opens at 0:00 as @image_1 exactly. ` : ''
+        const actionBody = fullDialogue
+          ? annotatedDialogue
+          : startFrameUrl ? '' : `@image_1 faces camera. Eyes on lens at 0:00.`
+        const onerTail = fullDialogue ? ` Natural conversational gestures as ${she} speaks. End cleanly with the character holding a final pose, no talking or lip movement.` : ''
+        shots.push(`ACTION:\n0:00 to 0:${String(duration).padStart(2,'0')} — ${framing}, ${lens}, ${move}. One continuous take.\n\n${startPin}${actionBody}${onerTail}`.trimEnd())
       } else if (i === 0) {
-        const hookLine = dialogueLines[0] ? annotateDialogue(dialogueLines[0], prod1Tag, duration, isHandheld, wearMode) : `@image_1 faces camera. Eyes on lens at 0:00.`
-        shots.push(`SHOT 1 — ${ts}, ${framing}, ${lens}, ${move}.\n${hookLine}`)
+        const startPin = startFrameUrl ? `Video opens at 0:00 as @image_1 exactly. ` : ''
+        const hookBody = dialogueLines[0] ? annotateDialogue(dialogueLines[0], prod1Tag, duration, isHandheld, wearMode, [], she, her, his) : (startFrameUrl ? '' : `@image_1 faces camera. Eyes on lens at 0:00.`)
+        shots.push(`SHOT 1 — ${ts}, ${framing}, ${lens}, ${move}.\n${startPin}${hookBody}`.trimEnd())
       } else {
         const line = dialogueLines[i] || ''
         const gesture = prod1Tag && i === 1
-          ? (wearMode ? `she touches ${prod1Tag} and angles toward camera to show it` : `she tilts ${prod1Tag} toward camera slightly`)
+          ? (wearMode ? `${she} touches ${prod1Tag} and angles toward camera to show it` : `${she} tilts ${prod1Tag} toward camera slightly`)
           : 'one hand lifts — palm-up, natural half-shrug'
         const lineStr = line ? `"${line.trim()}" [beat — eyes stay on camera.] ` : '[holds the moment.] '
-        const closingTail = i === shotCount - 1 ? ' End cleanly with the character holding a final pose, no talking or lip movement.' : ''
-        shots.push(`SHOT ${i+1} — ${ts}, ${framing}, ${lens}, ${move}.\n@image_1 continues. ${gesture}. ${lineStr}Voice unhurried. Tone genuine.${closingTail}`)
+        const closingTail = fullDialogue && i === shotCount - 1 ? ' End cleanly with the character holding a final pose, no talking or lip movement.' : ''
+        const voiceTail = fullDialogue ? ' Voice unhurried. Tone genuine.' : ''
+        shots.push(`SHOT ${i+1} — ${ts}, ${framing}, ${lens}, ${move}.\n@image_1 continues. ${gesture}. ${lineStr}${voiceTail}${closingTail}`.trimEnd())
       }
       t = te
     }
 
     // SUBJECT — identity + detail enhancement from close-up refs
-    const subjectParts = [`@image_1 is the identity — face, bone structure, skin tone, hair. Match exactly.`]
-    if (tagMap.closeup1) subjectParts.push(`${tagMap.closeup1} for close-up facial detail — eye color, skin texture, pores.`)
-    if (tagMap.closeup2) subjectParts.push(`${tagMap.closeup2} for feature-level accuracy — lip shape, brow arch, skin tone.`)
+    const genderHint = influencer.gender === 'Male' ? 'Male presenter. ' : influencer.gender === 'Female' ? 'Female presenter. ' : ''
+    const subjectParts = startFrameUrl
+      ? [`${genderHint}@image_1 is the start frame — begin the video from this exact frame. Identity (face, bone structure, skin tone, hair) is locked to @image_1 throughout. Match exactly.`]
+      : [`${genderHint}@image_1 is the identity — face, bone structure, skin tone, hair. Match exactly.`]
+    if (!startFrameUrl && tagMap.closeup1) subjectParts.push(`${tagMap.closeup1} for close-up facial detail — eye color, skin texture, pores.`)
+    if (!startFrameUrl && tagMap.closeup2) subjectParts.push(`${tagMap.closeup2} for feature-level accuracy — lip shape, brow arch, skin tone.`)
 
-    // WARDROBE — selected wardrobe ref takes priority, then charsheet, then slot names
-    const wardrobeLine = tagMap.wardrobe
-      ? `Match outfit from ${tagMap.wardrobe} exactly — silhouette, fabric, color, styling, zero variation. Outfit comes from ${tagMap.wardrobe} only, not @image_1.`
-      : tagMap.charsheet
-        ? `Match ${tagMap.charsheet} exactly — same outfit silhouette, fabric, color, styling throughout. Zero variation.`
-        : ((influencer.wardrobeSlots||[]).filter(s=>s.name).map(s=>s.name).join(', ') || 'Casual, stylish, consistent throughout.')
+    // WARDROBE — in start frame mode the outfit is baked into @image_1
+    const wardrobeLine = startFrameUrl
+      ? `Continue outfit from @image_1 exactly — same silhouette, fabric, color, styling throughout. Zero variation.`
+      : tagMap.wardrobe
+        ? `Match outfit from ${tagMap.wardrobe} exactly — silhouette, fabric, color, styling, zero variation. Outfit comes from ${tagMap.wardrobe} only, not @image_1.`
+        : tagMap.charsheet
+          ? `Match ${tagMap.charsheet} exactly — same outfit silhouette, fabric, color, styling throughout. Zero variation.`
+          : ((influencer.wardrobeSlots||[]).filter(s=>s.name).map(s=>s.name).join(', ') || 'Casual, stylish, consistent throughout.')
 
     const allPresets = [...(VOICE_PRESETS.female || []), ...(VOICE_PRESETS.male || [])]
     const deliveryLine = audioDataUrl
@@ -2977,19 +4190,27 @@ function ContentStudio({ influencer, onUpdate, onSaveToScripts }) {
       ? `Voice: ${voiceCustom.trim()}`
       : voicePreset
       ? `Voice: ${allPresets.find(v => v.id === voicePreset)?.voice || ''}`
-      : fullDialogue ? 'Natural voice, genuine and present.' : 'No dialogue.'
+      : fullDialogue ? 'Natural voice, genuine and present.' : `No dialogue. ${inferAmbientSound(envKey, environment)}`
 
-    // For multi-shot: append any unfired beats to the shot whose time window contains the beat
-    const shotsWithBeats = shotMode === 'oner' ? shots : shots.map((shot, i) => {
-      const shotStart = shotDurs.slice(0, i).reduce((a, b) => a + b, 0)
-      const shotEnd = shotStart + shotDurs[i]
-      const beatsForShot = actionBeats.filter(b => {
-        const sec = b.fraction * duration
-        return sec >= shotStart && sec < shotEnd && !b.fired
-      })
-      beatsForShot.forEach(b => { b.fired = true })
-      if (!beatsForShot.length) return shot
-      return shot + '\n' + beatsForShot.map(b => `At ${b.timestamp} — ${b.text}.`).join(' ')
+    // Append any unfired beats to their target shot
+    const shotsWithBeats = shots.map((shot, i) => {
+      let unfired
+      if (shotMode === 'oner') {
+        unfired = actionBeats.filter(b => !b.fired)
+      } else {
+        const shotStart = shotDurs.slice(0, i).reduce((a, b) => a + b, 0)
+        const shotEnd = shotStart + shotDurs[i]
+        unfired = actionBeats.filter(b => {
+          const sec = b.fraction * duration
+          return sec >= shotStart && sec < shotEnd && !b.fired
+        })
+      }
+      unfired.forEach(b => { b.fired = true })
+      if (!unfired.length) return shot
+      const beatStr = shotMode === 'oner'
+        ? unfired.map(b => `${b.text}.`).join(' ')
+        : unfired.map(b => `At ${b.timestamp} — ${b.text}.`).join(' ')
+      return shot + '\n' + beatStr
     })
 
     return `FORMAT: ${duration}s / ${shotCount === 1 ? '1 SHOT — continuous oner, ZERO CUTS' : `${shotCount} SHOTS`} / direct address
@@ -2997,7 +4218,7 @@ function ContentStudio({ influencer, onUpdate, onSaveToScripts }) {
 SUBJECT: ${subjectParts.join(' ')}
 
 WARDROBE: ${wardrobeLine}
-
+${productSection ? '\n' + productSection + '\n' : ''}
 ENVIRONMENT: ${envDesc}
 
 MOOD: ${moodArc}
@@ -3008,7 +4229,7 @@ STYLE: ${stylePreset}
 
 DELIVERY: ${deliveryLine}
 ${directionNotes ? `\nDIRECTION: ${directionNotes}` : ''}
-LOGIC RULE: @image_1 face is fixed — same bone structure, eye color, skin tone, jawline, zero drift. Only one @image_1 in frame at any time.${shotMode==='oner' ? ' ZERO CUTS — single uninterrupted take 0:00 to ' + duration + 's. No jump cuts, no zoom, no camera switch, no temporal skip. @image_1 moves continuously — never freezes.' : ' Wardrobe identical across all shots.'}${tagMap.wardrobe ? ` Outfit matches ${tagMap.wardrobe} throughout — do not take outfit from @image_1.` : ''} No phone or smartphone visible in frame at any time — no device in hand, on any surface, or in the background. No music. No captions. No text overlays.${productRules.length ? ' ' + productRules.join(' ') : ''}
+LOGIC RULE: @image_1 face is fixed — same bone structure, eye color, skin tone, jawline, zero drift. Only one @image_1 in frame at any time.${shotMode==='oner' ? ' ZERO CUTS — single uninterrupted take 0:00 to ' + duration + 's. No jump cuts, no zoom, no camera switch, no temporal skip. @image_1 moves continuously — never freezes.' : ' Wardrobe identical across all shots.'}${tagMap.wardrobe ? ` Outfit matches ${tagMap.wardrobe} throughout — do not take outfit from @image_1.` : ''}${!isHandheld ? ' No phone or smartphone visible in frame at any time — no device in hand, on any surface, or in the background.' : ''} No music. No captions. No text overlays.${productRules.length ? ' ' + productRules.join(' ') : ''}
 
 ---
 
@@ -3022,15 +4243,36 @@ ${shotsWithBeats.join('\n\n')}`
   }
 
   function saveScript({ title }) {
+    const refs = [
+      { url: influencer.mainImage,           label: 'Main Photo' },
+      { url: selectedWardrobe?.image || influencer.characterSheetImage, label: selectedWardrobe ? selectedWardrobe.name : 'Character Sheet' },
+      { url: influencer.closeUpImage1,       label: 'Close-up' },
+      { url: influencer.closeUpImage2,       label: 'Feature Sheet' },
+      { url: selectedHome?.image,            label: 'Home' },
+      { url: productRef1,                    label: 'Product 1' },
+      { url: productRef2,                    label: 'Product 2' },
+      { url: productRef3,                    label: 'Product 3' },
+    ].filter(r => r.url)
     const newScript = {
       id: Math.random().toString(36).slice(2),
       title,
       status: 'Unposted',
       prompt: buildPrompt(),
       script: dialogue.trim(),
-      videoUrls: [],
+      videoUrls: [...new Set(genResults)],
+      refs,
       postedUrl: '',
-      meta: { camera, vibe, duration, aspect, envKey, shotMode, hasProduct: !!(productRef1||productRef2||productRef3) },
+      meta: {
+        camera, vibe, duration, aspect, envKey,
+        environment: CS_ENV_PRESETS[envKey] || environment,
+        shotMode,
+        hasProduct: !!(productRef1||productRef2||productRef3),
+        voicePreset,
+        voiceCustom,
+        voiceLabel: ([...(VOICE_PRESETS.female||[]),...(VOICE_PRESETS.male||[])].find(v=>v.id===voicePreset)?.label) || voiceCustom || '',
+        wardrobeName: selectedWardrobe?.name || '',
+        additionalNotes: additionalNotes.trim(),
+      },
     }
     onUpdate({ scripts: [newScript, ...(influencer.scripts||[])] })
     setSaved(true)
@@ -3056,11 +4298,27 @@ ${shotsWithBeats.join('\n\n')}`
 
   function saveToHistory() {
     const builtPrompt = buildPrompt()
-    const entry = { dialogue, environment, envKey, camera, vibe, voicePreset, voiceCustom, additionalNotes, duration, aspect, outputs, shotMode, productRef1, productRef2, productRef3, productWorn, prompt: builtPrompt, ts: Date.now() }
-    const prev = JSON.parse(localStorage.getItem('hf_video_history') || '[]')
-    const next = [entry, ...prev.filter(e => e.ts !== entry.ts)].slice(0, 5)
-    localStorage.setItem('hf_video_history', JSON.stringify(next))
-    setHistory(next)
+    // Strip base64 product refs — they can be several MB each and blow the localStorage quota.
+    // The wardrobe system already persists those images; history only needs script/settings.
+    const entry = { dialogue, environment, envKey, camera, vibe, voicePreset, voiceCustom, additionalNotes, duration, aspect, outputs, shotMode, productWorn, prompt: builtPrompt, ts: Date.now() }
+    const histKey = `hf_video_history_${influencer.id}`
+    const tryWrite = (entries) => {
+      try {
+        localStorage.setItem(histKey, JSON.stringify(entries))
+        setHistory(entries)
+        return true
+      } catch { return false }
+    }
+    try {
+      const prev = JSON.parse(localStorage.getItem(histKey) || '[]')
+        .map(e => { const c = { ...e }; delete c.productRef1; delete c.productRef2; delete c.productRef3; return c })
+      const full = [entry, ...prev.filter(e => e.ts !== entry.ts)].slice(0, 5)
+      if (tryWrite(full)) return
+      // Quota hit — retry with fewer entries, then without the prompt string
+      if (tryWrite(full.slice(0, 2))) return
+      const slim = full.slice(0, 2).map(e => { const c = { ...e }; delete c.prompt; return c })
+      tryWrite(slim)
+    } catch { /* never crash generate() over a history write */ }
   }
 
   function restoreHistory(entry) {
@@ -3108,12 +4366,20 @@ ${shotsWithBeats.join('\n\n')}`
   function cancelGeneration() {
     cancelRef.current = true
     clearInterval(elapsedRef.current)
+    clearPendingVideo(influencer.id)
+    try { localStorage.removeItem(`hf_gen_start_${influencer.id}`) } catch {}
+    try { localStorage.removeItem(`hf_gen_results_${influencer.id}`) } catch {}
     setGenerating(false)
     setGenProgress(0)
+    setGenResults([])
+    setElapsed(0)
   }
 
   async function generate() {
+    const myEpoch = ++genEpochRef.current  // invalidates any prior generate() or resume loop immediately
     cancelRef.current = false
+    const savedOnGenerated = onGeneratedRef.current  // capture before async — stays tied to this influencer even if user switches
+    setLockedOutputs(outputs)
     setGenerating(true)
     setGenError(null)
     setGenResults([])
@@ -3121,9 +4387,10 @@ ${shotsWithBeats.join('\n\n')}`
     try { localStorage.removeItem(`hf_gen_results_${influencer.id}`) } catch {}
     setGenProgress(0)
     setElapsed(0)
-    saveToHistory()
+    try { saveToHistory() } catch { /* never block generation over history */ }
     setLastGeneratedPrompt(buildPrompt())
     const start = Date.now()
+    try { localStorage.setItem(`hf_gen_start_${influencer.id}`, String(start)) } catch {}
     elapsedRef.current = setInterval(() => setElapsed(Math.floor((Date.now() - start) / 1000)), 1000)
     try {
       const result = await generateVideo({
@@ -3131,24 +4398,30 @@ ${shotsWithBeats.join('\n\n')}`
         aspectRatio: aspect,
         duration,
         count: outputs,
-        referenceImages: buildRefs(),
+        referenceImages: startFrameUrl
+          ? [startFrameUrl, productRef1, productRef2, productRef3].filter(Boolean)
+          : buildRefs(),
+        startFrameUrl: null,  // start frame is passed as @image_1 via referenceImages; start_image role would duplicate it
         audioRef: audioDataUrl || null,
         model: videoModel,
         resolution,
         onProgress: setGenProgress,
-        onPartialResults: partials => { if (!cancelRef.current) persistGenResults([...partials]) },
-        isCancelled: () => cancelRef.current,
+        onPartialResults: partials => { if (!cancelRef.current && genEpochRef.current === myEpoch) persistGenResults([...partials]) },
+        isCancelled: () => cancelRef.current || genEpochRef.current !== myEpoch,
         pendingKey: influencer.id,
       })
-      if (!cancelRef.current) {
+      if (!cancelRef.current && genEpochRef.current === myEpoch) {
         persistGenResults(result.urls)
         setGenShareUrls(result.shareUrls || [])
       }
+      const histUrls = [...new Set(result.urls.filter(Boolean))]
+      if (histUrls.length && genEpochRef.current === myEpoch) savedOnGenerated?.(histUrls, currentSettingsSnapshot())
     } catch (e) {
-      if (!cancelRef.current) setGenError(e.message)
+      if (!cancelRef.current && genEpochRef.current === myEpoch) setGenError(e.message)
     } finally {
       clearInterval(elapsedRef.current)
-      setGenerating(false)
+      try { localStorage.removeItem(`hf_gen_start_${influencer.id}`) } catch {}
+      if (genEpochRef.current === myEpoch) setGenerating(false)
     }
   }
 
@@ -3175,7 +4448,19 @@ ${shotsWithBeats.join('\n\n')}`
     }
   }
 
-  const canAct = dialogue.trim() || environment || vibe
+  const canAct = startFrameUrl || dialogue.trim() || environment || vibe
+
+  function doVideoRandomize() {
+    const vibeOpts = CS_VIBES
+    const envKeys  = Object.keys(CS_ENV_PRESETS)
+    const camOpts  = CS_CAMERAS
+    const rv = vibeOpts[Math.floor(Math.random() * vibeOpts.length)]
+    const ek = envKeys[Math.floor(Math.random() * envKeys.length)]
+    const rc = camOpts[Math.floor(Math.random() * camOpts.length)]
+    setVibe(rv); localStorage.setItem('hf_vibe', rv)
+    setEnvKey(ek); setEnvironment(CS_ENV_PRESETS[ek]); localStorage.setItem('hf_env_key', ek)
+    setCamera(rc); localStorage.setItem('hf_camera', rc)
+  }
 
   function clearAll() {
     setDialogue(''); localStorage.setItem('hf_dialogue', '')
@@ -3204,8 +4489,8 @@ ${shotsWithBeats.join('\n\n')}`
         />
       )}
 
-      {/* Influencer reference banner */}
-      {allImages.length > 0 ? (
+      {/* Influencer reference banner — hidden in start-frame mode */}
+      {allImages.length > 0 && !startFrameUrl ? (
         <div style={{
           display:'flex',alignItems:'center',gap:10,padding:'9px 13px',borderRadius:10,
           background:'rgba(139,92,246,0.06)',border:'1px solid rgba(139,92,246,0.15)',
@@ -3218,9 +4503,52 @@ ${shotsWithBeats.join('\n\n')}`
               }}/>
             ))}
           </div>
-          <div style={{fontSize:12,color:'var(--text-secondary)'}}>
-            <span style={{fontWeight:600,color:'var(--text-primary)'}}>{influencer.name}'s images</span>{' '}
-            are auto-included as identity references
+          <div style={{fontSize:12,color:'var(--text-secondary)',display:'flex',alignItems:'center',gap:6}}>
+            <span>
+              <span style={{fontWeight:600,color:'var(--text-primary)'}}>{influencer.name}'s images</span>{' '}
+              are auto-included as identity references
+            </span>
+            <div style={{position:'relative',flexShrink:0}}
+              onMouseEnter={()=>setRefTip(true)}
+              onMouseLeave={()=>setRefTip(false)}
+            >
+              <div style={{
+                width:14,height:14,borderRadius:'50%',border:'1.5px solid var(--text-tertiary)',
+                display:'flex',alignItems:'center',justifyContent:'center',
+                fontSize:8,fontWeight:700,color:'var(--text-tertiary)',cursor:'default',lineHeight:1,
+              }}>i</div>
+              {refTip && (
+                <div style={{
+                  position:'absolute',top:'calc(100% + 8px)',right:0,
+                  zIndex:999,background:'var(--surface)',border:'1px solid var(--border)',
+                  borderRadius:12,padding:'12px 12px 10px',boxShadow:'0 8px 28px rgba(0,0,0,0.4)',
+                  pointerEvents:'none',
+                }}>
+                  <div style={{fontSize:10,fontWeight:700,color:'var(--text-primary)',marginBottom:10,whiteSpace:'nowrap'}}>Reference images</div>
+                  <div style={{display:'flex',gap:8}}>
+                    {[
+                      {key:'mainImage',          label:'Main',            url:influencer.mainImage},
+                      {key:'characterSheetImage',label:'Character Sheet', url:influencer.characterSheetImage},
+                      {key:'closeUpImage1',      label:'Close Up',        url:influencer.closeUpImage1},
+                      {key:'closeUpImage2',      label:'Feature Sheet',   url:influencer.closeUpImage2},
+                    ].filter(img=>img.url).map(img=>(
+                      <div key={img.key} style={{display:'flex',flexDirection:'column',alignItems:'center',gap:5}}>
+                        <img src={img.url} alt={img.label} style={{
+                          width:54,height:76,objectFit:'cover',objectPosition:'top',
+                          borderRadius:7,border:'1px solid var(--border)',flexShrink:0,
+                        }}/>
+                        <span style={{fontSize:9,color:'var(--text-tertiary)',fontWeight:600,width:54,textAlign:'center',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{img.label}</span>
+                      </div>
+                    ))}
+                  </div>
+                  <div style={{
+                    position:'absolute',top:-5,right:6,transform:'rotate(45deg)',
+                    width:9,height:9,background:'var(--surface)',
+                    border:'1px solid var(--border)',borderBottom:'none',borderRight:'none',
+                  }}/>
+                </div>
+              )}
+            </div>
           </div>
           <div style={{marginLeft:'auto',display:'flex',alignItems:'center',gap:6,flexShrink:0}}>
             {history.length > 0 && (
@@ -3248,6 +4576,18 @@ ${shotsWithBeats.join('\n\n')}`
             fontSize:11,fontWeight:600,color:'var(--text-tertiary)',
             background:'transparent',border:'1px solid var(--border)',
           }}>Clear</button>
+        </div>
+      )}
+
+      {/* Start frame */}
+      {startFrameUrl && (
+        <div style={{display:'flex',alignItems:'center',gap:10,padding:'8px 12px',borderRadius:10,background:'rgba(236,72,153,0.06)',border:'1px solid rgba(236,72,153,0.2)'}}>
+          <img src={startFrameUrl} alt="Start frame" style={{width:36,height:48,objectFit:'cover',objectPosition:'top',borderRadius:6,border:'1px solid rgba(236,72,153,0.3)',flexShrink:0}}/>
+          <div style={{flex:1,minWidth:0}}>
+            <div style={{fontSize:11,fontWeight:700,color:'#EC4899',marginBottom:2}}>Start Frame</div>
+            <div style={{fontSize:11,color:'var(--text-tertiary)'}}>Video begins from this photo</div>
+          </div>
+          <button onClick={clearStartFrame} style={{width:24,height:24,borderRadius:'50%',border:'none',background:'rgba(236,72,153,0.12)',color:'#EC4899',fontSize:14,cursor:'pointer',display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0}}>×</button>
         </div>
       )}
 
@@ -3289,7 +4629,7 @@ ${shotsWithBeats.join('\n\n')}`
         <CSStepHeader n={1} title="Script" sub={`What should ${influencer.name} say?`}/>
         <textarea
           value={dialogue}
-          onChange={e=>{setDialogue(e.target.value);localStorage.setItem('hf_dialogue',e.target.value)}}
+          onChange={e => setDialogue(e.target.value)}
           placeholder={`Write what ${influencer.name} should say...`}
           rows={4}
           style={{
@@ -3341,6 +4681,76 @@ ${shotsWithBeats.join('\n\n')}`
             })}
           </div>
         )}
+        {(influencer.brandDeals||[]).filter(d=>d.image||d.characterSheet).length>0&&(
+          <div style={{marginTop:14}}>
+            <div style={{fontSize:11,fontWeight:600,color:'var(--text-tertiary)',marginBottom:8}}>From brand deals</div>
+            {/* Single horizontal scroll row — stays clean with any number of deals */}
+            <div style={{display:'flex',gap:10,overflowX:'auto',paddingBottom:6,paddingTop:2,
+              scrollbarWidth:'none', msOverflowStyle:'none',
+            }}>
+              <style>{`.deal-strip::-webkit-scrollbar{display:none}`}</style>
+              {(influencer.brandDeals||[]).filter(d=>d.image||d.characterSheet).map(deal=>{
+                const hasSheet = !!deal.characterSheet && !!deal.image
+                const useSheet = hasSheet ? (dealViewSheet[deal.id] === true) : !!deal.characterSheet
+                const activeUrl = useSheet ? (deal.characterSheet||deal.image) : deal.image
+                return (
+                  <div key={deal.id} style={{display:'flex',flexDirection:'column',alignItems:'center',gap:5,flexShrink:0}}>
+                    <div
+                      style={{cursor:'pointer'}}
+                      onMouseEnter={e=>{
+                        const r = e.currentTarget.getBoundingClientRect()
+                        const POPUP_W = 284
+                        const spaceRight = window.innerWidth - r.right - 10
+                        const left = spaceRight >= POPUP_W ? r.right + 10 : r.left - POPUP_W - 10
+                        const top = Math.min(Math.max(r.top - 20, 8), window.innerHeight - 280)
+                        setDealPopup({id:deal.id,url:activeUrl,brand:deal.brand,useSheet,hasSheet,left,top})
+                      }}
+                      onMouseLeave={()=>setDealPopup(null)}
+                      onClick={()=>assignProduct(activeUrl)}
+                    >
+                      <img src={activeUrl} style={{width:64,height:80,objectFit:'cover',objectPosition:'top',borderRadius:9,border:'1.5px solid var(--border)',display:'block'}} alt={deal.brand}/>
+                    </div>
+                    <div style={{fontSize:9,color:'var(--text-tertiary)',width:64,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',textAlign:'center'}}>{deal.brand}</div>
+                    {hasSheet && (
+                      <div style={{display:'flex',borderRadius:6,overflow:'hidden',border:'1px solid var(--border)'}}>
+                        {[{label:'Orig',val:false},{label:'Sheet',val:true}].map(({label,val})=>{
+                          const active = useSheet === val
+                          return (
+                            <button key={label} onClick={()=>setDealViewSheet(p=>({...p,[deal.id]:val}))} style={{
+                              padding:'3px 7px',border:'none',cursor:'pointer',fontFamily:'inherit',fontWeight:700,fontSize:9,lineHeight:1.4,
+                              background: active ? 'linear-gradient(135deg,rgba(236,72,153,0.18),rgba(139,92,246,0.18))' : 'var(--bg-tertiary)',
+                              color: active ? '#8B5CF6' : 'var(--text-secondary)',
+                              transition:'all 0.12s',
+                            }}>{label}</button>
+                          )
+                        })}
+                      </div>
+                    )}
+                  </div>
+                )
+              })}
+            </div>
+          </div>
+        )}
+
+        {/* Fixed-position deal popup — escapes all parent overflow clipping */}
+        {dealPopup && createPortal(
+          <div style={{
+            position:'fixed',
+            left: dealPopup.left,
+            top: dealPopup.top,
+            zIndex:9999, pointerEvents:'none',
+            background:'var(--surface)',border:'1px solid var(--border)',
+            borderRadius:14,padding:12,boxShadow:'0 12px 40px rgba(0,0,0,0.5)',
+            display:'flex',flexDirection:'column',gap:8,alignItems:'center',
+            width:260,
+          }}>
+            <img src={dealPopup.url} style={{maxWidth:260,maxHeight:200,width:'auto',height:'auto',objectFit:'contain',borderRadius:9,display:'block'}}/>
+            <div style={{fontSize:11,fontWeight:700,color:'var(--text-primary)'}}>{dealPopup.brand}</div>
+            <div style={{fontSize:10,color:'var(--text-tertiary)'}}>{dealPopup.useSheet && dealPopup.hasSheet ? 'Character sheet' : 'Original image'}</div>
+          </div>,
+          document.body
+        )}
       </Sec>
 
       {/* Advanced Settings toggle */}
@@ -3362,58 +4772,79 @@ ${shotsWithBeats.join('\n\n')}`
       {/* Advanced options — collapsible */}
       {advanced && (<>
 
+        {/* Time of Day */}
+        <Sec>
+          <CSStepHeader n={3} title="Time of Day" sub="Lighting and atmosphere of the scene."/>
+          <div style={{display:'flex',gap:8,flexWrap:'wrap'}}>
+            {[['morning','🌅'],['afternoon','☀️'],['golden hour','🌇'],['night','🌙']].map(([val, icon]) => {
+              const on = videoTimeOfDay === val
+              return (
+                <button key={val} onClick={() => setVideoTimeOfDay(val)} style={{
+                  padding:'7px 14px', borderRadius:980, fontSize:12, fontWeight:600,
+                  background: on ? 'linear-gradient(135deg,rgba(236,72,153,0.15),rgba(139,92,246,0.15))' : 'var(--bg-tertiary)',
+                  color: on ? '#8B5CF6' : 'var(--text-secondary)',
+                  border: on ? '1.5px solid rgba(139,92,246,0.4)' : '1.5px solid transparent',
+                  transition:'all 0.15s', cursor:'pointer', fontFamily:'inherit',
+                }}>{icon} {val.charAt(0).toUpperCase() + val.slice(1)}</button>
+              )
+            })}
+          </div>
+        </Sec>
+
         {/* Wardrobe */}
         <Sec>
-          <CSStepHeader n={3} title="Wardrobe" sub="Pin a wardrobe look as the outfit reference for this video."/>
-          {wardrobeSlots.length === 0 ? (
-            <div style={{fontSize:12,color:'var(--text-tertiary)',padding:'9px 12px',background:'var(--bg-tertiary)',borderRadius:8}}>
-              No wardrobe looks yet — generate some in the Wardrobe tab first.
+          <div style={{display:'flex',alignItems:'flex-start',gap:10,marginBottom:14}}>
+            <div style={{width:22,height:22,borderRadius:'50%',flexShrink:0,background:'linear-gradient(135deg,#EC4899,#8B5CF6)',color:'#fff',fontSize:11,fontWeight:800,display:'flex',alignItems:'center',justifyContent:'center',marginTop:1}}>4</div>
+            <div style={{flex:1}}>
+              <div style={{display:'flex',alignItems:'center',gap:8}}>
+                <div style={{fontSize:13,fontWeight:700,color:'var(--text-primary)',lineHeight:1.2}}>Wardrobe</div>
+                <button
+                  onClick={() => setCsWardrobeOpen(true)}
+                  style={{
+                    display:'flex',alignItems:'center',gap:4,flexShrink:0,
+                    padding:'3px 9px',borderRadius:980,fontSize:11,fontWeight:600,
+                    border:'1px solid rgba(139,92,246,0.35)',background:'rgba(139,92,246,0.08)',
+                    color:'#8B5CF6',cursor:'pointer',fontFamily:'inherit',
+                  }}
+                >
+                  <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                  Add Outfit
+                </button>
+              </div>
+              <div style={{fontSize:11,color:'var(--text-tertiary)',marginTop:2}}>Pin a wardrobe look as the outfit reference for this video.</div>
+            </div>
+          </div>
+          {startFrameUrl ? (
+            <div style={{fontSize:12,color:'var(--text-tertiary)',padding:'10px 12px',background:'var(--bg-tertiary)',borderRadius:10,lineHeight:1.5}}>
+              Not applicable — outfit is already set by the start frame.
             </div>
           ) : (
-            <div style={{display:'flex',flexDirection:'column',gap:10}}>
-              <div style={{display:'flex',gap:8,flexWrap:'wrap'}}>
-                <button
-                  onClick={() => { setSelectedWardrobeId(''); localStorage.setItem(`hf_wardrobe_id_${influencer.id}`, '') }}
-                  style={{
-                    padding:'7px 14px',borderRadius:980,fontSize:12,fontWeight:600,
-                    background: !selectedWardrobeId ? 'linear-gradient(135deg,rgba(236,72,153,0.15),rgba(139,92,246,0.15))' : 'var(--bg-tertiary)',
-                    color: !selectedWardrobeId ? '#8B5CF6' : 'var(--text-secondary)',
-                    border: !selectedWardrobeId ? '1.5px solid rgba(139,92,246,0.4)' : '1.5px solid transparent',
-                    transition:'all 0.15s',
-                  }}
-                >Current Look</button>
-                {wardrobeSlots.map(s => {
-                  const on = selectedWardrobeId === s.id
-                  return (
-                    <button key={s.id}
-                      onClick={() => { setSelectedWardrobeId(s.id); localStorage.setItem(`hf_wardrobe_id_${influencer.id}`, s.id) }}
-                      style={{
-                        padding:'7px 14px',borderRadius:980,fontSize:12,fontWeight:600,
-                        background: on ? 'linear-gradient(135deg,rgba(236,72,153,0.15),rgba(139,92,246,0.15))' : 'var(--bg-tertiary)',
-                        color: on ? '#8B5CF6' : 'var(--text-secondary)',
-                        border: on ? '1.5px solid rgba(139,92,246,0.4)' : '1.5px solid transparent',
-                        transition:'all 0.15s',
-                      }}
-                    >{s.name}</button>
-                  )
-                })}
-              </div>
-              {selectedWardrobe && (
-                <div style={{display:'flex',gap:12,alignItems:'center',padding:'10px 12px',background:'var(--bg-tertiary)',borderRadius:10}}>
-                  <img src={selectedWardrobe.image} alt={selectedWardrobe.name} style={{width:72,height:54,objectFit:'cover',borderRadius:8,flexShrink:0}}/>
-                  <div>
-                    <div style={{fontSize:12,fontWeight:700,color:'var(--text-primary)'}}>{selectedWardrobe.name}</div>
-                    <div style={{fontSize:11,color:'var(--text-tertiary)',marginTop:2}}>Sent as wardrobe reference · outfit will match this look</div>
-                  </div>
-                </div>
-              )}
+            <div style={{display:'flex',gap:8,flexWrap:'wrap'}}>
+              <WardrobeChipWithHover
+                slot={{ name: 'Current', image: influencer.characterSheetImage }}
+                active={!selectedWardrobeId}
+                onClick={() => { setSelectedWardrobeId(''); localStorage.setItem(`hf_wardrobe_id_${influencer.id}`, '') }}
+              />
+              {wardrobeSlots.map(s => {
+                const on = selectedWardrobeId === s.id
+                return (
+                  <WardrobeChipWithHover key={s.id} slot={s} active={on}
+                    onClick={() => { setSelectedWardrobeId(s.id); localStorage.setItem(`hf_wardrobe_id_${influencer.id}`, s.id) }}
+                  />
+                )
+              })}
             </div>
           )}
         </Sec>
 
         {/* Location */}
         <Sec>
-          <CSStepHeader n={4} title="Location" sub="Where is the scene? Pick a preset, use a home setting, or write your own."/>
+          <CSStepHeader n={5} title="Location" sub="Where is the scene? Pick a preset, use a home setting, or write your own."/>
+          {startFrameUrl ? (
+            <div style={{fontSize:12,color:'var(--text-tertiary)',padding:'10px 12px',background:'var(--bg-tertiary)',borderRadius:10,lineHeight:1.5}}>
+              Not applicable — location is already set by the start frame.
+            </div>
+          ) : (<>
 
           {/* Home setting picker */}
           {homeSlots.length > 0 && (
@@ -3483,11 +4914,12 @@ ${shotsWithBeats.join('\n\n')}`
               fontSize:13,color:'var(--text-primary)',boxSizing:'border-box',fontFamily:'inherit',
             }}
           />
+          </>)}
         </Sec>
 
         {/* Camera */}
         <Sec>
-          <CSStepHeader n={5} title="Camera" sub="How should the shot be framed?"/>
+          <CSStepHeader n={6} title="Camera" sub="How should the shot be framed?"/>
           <div style={{display:'flex',flexWrap:'wrap',gap:7}}>
             {CS_CAMERAS.map(c => {
               const meta = CAMERA_META[c] || { label: c, desc: '' }
@@ -3507,7 +4939,7 @@ ${shotsWithBeats.join('\n\n')}`
 
         {/* Vibe */}
         <Sec>
-          <CSStepHeader n={6} title="Vibe" sub="What's the overall mood and energy?"/>
+          <CSStepHeader n={7} title="Vibe" sub="What's the overall mood and energy?"/>
           <CSChips options={CS_VIBES} value={vibe} onChange={v=>{setVibe(v);localStorage.setItem('hf_vibe',v)}}/>
           {vibe && VIBE_META[vibe] && (
             <div style={{
@@ -3519,7 +4951,7 @@ ${shotsWithBeats.join('\n\n')}`
 
         {/* Voice */}
         <Sec>
-          <CSStepHeader n={7} title="Voice" sub="Upload your audio or pick a voice style."/>
+          <CSStepHeader n={8} title="Voice" sub="Upload your audio or pick a voice style."/>
 
           <input ref={audioFileRef} type="file" accept="audio/*" style={{display:'none'}} onChange={e => {
             const file = e.target.files?.[0]
@@ -3637,7 +5069,7 @@ ${shotsWithBeats.join('\n\n')}`
 
         {/* Shot type */}
         <Sec>
-          <CSStepHeader n={8} title="Shot Type" sub="How many cuts in the video?"/>
+          <CSStepHeader n={9} title="Shot Type" sub="How many cuts in the video?"/>
           <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:8}}>
             {[
               {id:'oner', label:'1 Shot', sub:'Zero cuts — one continuous take'},
@@ -3669,12 +5101,15 @@ ${shotsWithBeats.join('\n\n')}`
 
         {/* Additional Notes */}
         <Sec>
-          <CSStepHeader n={9} title="Additional Notes" sub="Hard requirements that go directly into the prompt."/>
+          <CSStepHeader n={10} title="Additional Notes" sub="Hard requirements that go directly into the prompt."/>
           <textarea
             value={additionalNotes}
             onChange={e => setAdditionalNotes(e.target.value)}
-            placeholder={`Actions go directly into the prompt — be specific.\n\ne.g. "She holds up the bracelet close to the camera at the start."\ne.g. "She laughs and looks away at 5s."\ne.g. "She pauses and smiles at the end."\n\nTip: add timing — "at the start", "at 4s", or "at the end" — otherwise it lands in the middle.`}
-            rows={6}
+            placeholder='e.g. "She holds up the bracelet close to the camera at the start."'
+            autoComplete="off"
+            autoCorrect="off"
+            spellCheck={false}
+            rows={3}
             style={{
               width:'100%',padding:'11px 13px',borderRadius:10,boxSizing:'border-box',
               border:'1.5px solid var(--border)',background:'var(--bg)',
@@ -3686,7 +5121,7 @@ ${shotsWithBeats.join('\n\n')}`
 
         {/* Settings */}
         <Sec>
-          <CSStepHeader n={10} title="Settings"/>
+          <CSStepHeader n={11} title="Settings"/>
 
           <div style={{display:'flex',gap:20,flexWrap:'wrap',alignItems:'flex-start'}}>
 
@@ -3764,6 +5199,9 @@ ${shotsWithBeats.join('\n\n')}`
           fontSize:13,color:'#FF3B30',lineHeight:1.5,
         }}>
           <strong>Generation failed:</strong> {genError}
+          {/session|expired|reconnect|timed out/i.test(genError) && (
+            <span style={{marginLeft:8,fontWeight:600}}>→ Go to Settings and reconnect Higgsfield.</span>
+          )}
         </div>
       )}
 
@@ -3792,8 +5230,8 @@ ${shotsWithBeats.join('\n\n')}`
                         : genProgress < 28 ? 'Uploading references...'
                         : genProgress < 35 ? 'Submitting to Seedance...'
                         : genProgress >= 95 ? 'Almost there...'
-                        : outputs > 1 && genResults.length > 0
-                          ? `Rendering · ${genResults.length}/${outputs} ready`
+                        : lockedOutputs > 1 && genResults.length > 0
+                          ? `Rendering · ${genResults.length}/${lockedOutputs} ready`
                           : 'Rendering...'}
                     </span>
                   </div>
@@ -3830,31 +5268,25 @@ ${shotsWithBeats.join('\n\n')}`
             display:'flex',
             flexDirection: aspect==='16:9' ? 'column' : 'row',
             gap:10,
-            maxWidth: aspect==='9:16' && outputs > 1 ? `${outputs * 220 + (outputs - 1) * 10}px` : '100%',
-            margin: aspect==='9:16' && outputs > 1 ? '0 auto' : 0,
+            maxWidth: aspect==='9:16' ? `${lockedOutputs * 220 + Math.max(0, lockedOutputs - 1) * 10}px` : '100%',
+            margin: aspect==='9:16' ? '0 auto' : 0,
             width:'100%',
           }}>
-            {Array.from({length: generating ? outputs : genResults.length}, (_,i) => {
+            {Array.from({length: generating ? lockedOutputs : genResults.length}, (_,i) => {
               const url = genResults[i]
               const isReady = !!url
-              const singlePortrait = aspect === '9:16' && outputs === 1
               return (
                 <div key={i} style={{
                   flex:1,minWidth:0,
                   borderRadius:14,overflow:'hidden',
                   border: isReady ? '1.5px solid var(--border)' : 'none',
-                  background: isReady ? (singlePortrait ? 'var(--bg)' : '#000') : 'transparent',
-                  display: isReady && singlePortrait ? 'flex' : 'block',
-                  flexDirection: isReady && singlePortrait ? 'row' : undefined,
+                  background: isReady ? '#000' : 'transparent',
                 }}>
                   {isReady ? (
                     <>
-                      {/* Video half */}
+                      {/* Video */}
                       <div style={{
-                        position:'relative',cursor:'pointer',background:'#000',flexShrink:0,
-                        width: singlePortrait ? 240 : '100%',
-                        borderRadius: singlePortrait ? '12px 0 0 12px' : 0,
-                        overflow:'hidden',
+                        position:'relative',cursor:'pointer',background:'#000',overflow:'hidden',
                       }} onClick={()=>setFullscreenUrl(url)}>
                         <video src={url} controls playsInline style={{
                           display:'block',background:'#000',
@@ -3870,107 +5302,61 @@ ${shotsWithBeats.join('\n\n')}`
                         }}>⛶ expand</div>
                       </div>
 
-                      {/* Info panel — only for single portrait */}
-                      {singlePortrait ? (
-                        <div style={{
-                          flex:1,display:'flex',flexDirection:'column',gap:12,
-                          padding:'20px 18px',justifyContent:'space-between',
-                          background:'var(--bg)',
-                        }}>
-                          <div style={{display:'flex',flexDirection:'column',gap:10}}>
-                            <div style={{display:'flex',gap:6,flexWrap:'wrap'}}>
-                              {[`${duration}s`, aspect, camera, shotMode === 'oner' ? '1-shot' : 'multi-shot'].map(tag=>(
-                                <span key={tag} style={{
-                                  fontSize:11,fontWeight:600,padding:'3px 9px',borderRadius:20,
-                                  background:'var(--bg-tertiary)',color:'var(--text-secondary)',
-                                  border:'1px solid var(--border)',
-                                }}>{tag}</span>
-                              ))}
-                            </div>
-                            {dialogue && (
-                              <div style={{
-                                fontSize:13,lineHeight:1.6,color:'var(--text-secondary)',
-                                fontStyle:'italic',maxHeight:160,overflowY:'auto',
-                                padding:'10px 12px',borderRadius:10,
-                                background:'var(--bg-tertiary)',border:'1px solid var(--border-subtle)',
-                              }}>"{dialogue}"</div>
-                            )}
-                          </div>
-                          <div style={{display:'flex',flexDirection:'column',gap:7}}>
-                            <a href={url} download target="_blank" rel="noreferrer" style={{
-                              padding:'10px',borderRadius:10,fontSize:13,fontWeight:600,textAlign:'center',
-                              background:'var(--bg-tertiary)',color:'var(--text-secondary)',textDecoration:'none',
-                              border:'1.5px solid var(--border)',display:'block',
-                            }}>Download</a>
-                            {!generating && (
-                              <button onClick={()=>regenerateSlot(i)} disabled={regenSlot!==null} style={{
-                                padding:'10px',borderRadius:10,fontSize:13,fontWeight:600,
-                                background: regenSlot===i ? 'rgba(139,92,246,0.1)' : 'var(--bg-tertiary)',
-                                color: regenSlot===i ? '#8B5CF6' : 'var(--text-tertiary)',
-                                border:'1.5px solid var(--border)',
-                              }}>
-                                {regenSlot===i ? 'Generating...' : '↺ Try again'}
-                              </button>
-                            )}
-                          </div>
-                        </div>
-                      ) : (
-                        /* Action bar for multi-card */
-                        <div style={{display:'flex',gap:7,padding:'9px 10px',background:'var(--bg)'}}>
-                          <a href={url} download target="_blank" rel="noreferrer" style={{
-                            flex:1,padding:'8px',borderRadius:8,fontSize:12,fontWeight:600,textAlign:'center',
-                            background:'var(--bg-tertiary)',color:'var(--text-secondary)',textDecoration:'none',
-                            border:'1.5px solid var(--border)',display:'block',
-                          }}>Download</a>
-                          {!generating && (
-                            <button onClick={()=>regenerateSlot(i)} disabled={regenSlot!==null} style={{
-                              padding:'8px 10px',borderRadius:8,fontSize:12,fontWeight:600,
-                              background: regenSlot===i ? 'rgba(139,92,246,0.1)' : 'var(--bg-tertiary)',
-                              color: regenSlot===i ? '#8B5CF6' : 'var(--text-tertiary)',
-                              border:'1.5px solid var(--border)',flexShrink:0,
-                            }}>
-                              {regenSlot===i ? '...' : '↺'}
-                            </button>
-                          )}
-                        </div>
-                      )}
+                      {/* Action bar */}
+                      <div style={{display:'flex',gap:7,padding:'9px 10px',background:'var(--bg)'}}>
+                        <button onClick={async()=>{
+                          try{
+                            const res=await fetch(url)
+                            const blob=await res.blob()
+                            const a=document.createElement('a')
+                            a.href=URL.createObjectURL(blob)
+                            a.download=`video-${i+1}.mp4`
+                            a.click()
+                            setTimeout(()=>URL.revokeObjectURL(a.href),60000)
+                          }catch{
+                            const a=document.createElement('a');a.href=url;a.download=`video-${i+1}.mp4`;a.click()
+                          }
+                        }} style={{
+                          flex:1,padding:'8px',borderRadius:8,fontSize:12,fontWeight:600,textAlign:'center',
+                          background:'var(--bg-tertiary)',color:'var(--text-secondary)',
+                          border:'1.5px solid var(--border)',cursor:'pointer',fontFamily:'inherit',
+                        }}>Download</button>
+                        {!generating && (
+                          <button onClick={()=>regenerateSlot(i)} disabled={regenSlot!==null} style={{
+                            padding:'8px 10px',borderRadius:8,fontSize:12,fontWeight:600,
+                            background: regenSlot===i ? 'rgba(139,92,246,0.1)' : 'var(--bg-tertiary)',
+                            color: regenSlot===i ? '#8B5CF6' : 'var(--text-tertiary)',
+                            border:'1.5px solid var(--border)',flexShrink:0,
+                          }}>
+                            {regenSlot===i ? '...' : '↺'}
+                          </button>
+                        )}
+                      </div>
                     </>
                   ) : (
-                    /* Skeleton card — clean dark with shimmer */
+                    /* Loading card — matches Photo Studio style */
                     <div style={{
-                      position:'relative',overflow:'hidden',
                       aspectRatio: aspect==='9:16' ? '9/16' : '16/9',
-                      background:'linear-gradient(160deg,#16082e 0%,#1d0c3a 55%,#120820 100%)',
-                      border:'1.5px solid rgba(139,92,246,0.18)',
+                      background:'var(--bg-tertiary)',
+                      border:'1.5px solid var(--border)',
                       borderRadius:14,
-                      boxShadow:'0 8px 32px rgba(139,92,246,0.18)',
+                      display:'flex',flexDirection:'column',
+                      alignItems:'center',justifyContent:'center',
+                      gap:10,padding:16,
                     }}>
-                      {/* sweep shimmer */}
-                      <div style={{
-                        position:'absolute',inset:0,
-                        background:'linear-gradient(105deg,transparent 30%,rgba(139,92,246,0.13) 50%,transparent 70%)',
-                        animation:`cs-shimmer 2.6s ease-in-out ${i * 0.55}s infinite`,
-                      }}/>
-                      {/* bottom pink glow */}
-                      <div style={{
-                        position:'absolute',bottom:0,left:0,right:0,height:'50%',
-                        background:'linear-gradient(to top,rgba(236,72,153,0.14),transparent)',
-                        pointerEvents:'none',
-                      }}/>
-                      {/* spinning star */}
-                      <div style={{position:'absolute',inset:0,display:'flex',alignItems:'center',justifyContent:'center'}}>
-                        <svg width="22" height="22" viewBox="0 0 24 24" fill="rgba(139,92,246,0.28)"
-                          style={{animation:`cs-spin ${9 + i * 2.5}s linear infinite`}}>
-                          <path d="M12 2l2.4 7.4H22l-6.2 4.5 2.4 7.4L12 17l-6.2 4.3 2.4-7.4L2 9.4h7.6z"/>
-                        </svg>
+                      <div style={{fontSize:12,fontWeight:600,color:'var(--text-primary)',textAlign:'center'}}>
+                        {lockedOutputs > 1 ? `Generating ${i+1} of ${lockedOutputs}…` : 'Generating…'}
                       </div>
-                      {/* slot number + timer */}
-                      {outputs > 1 && (
-                        <div style={{position:'absolute',top:10,right:12,fontSize:10,fontWeight:600,color:'rgba(255,255,255,0.18)'}}>
-                          {i+1}/{outputs}
-                        </div>
-                      )}
-                      <div style={{position:'absolute',bottom:10,right:12,fontSize:11,fontWeight:600,color:'rgba(139,92,246,0.35)',fontVariantNumeric:'tabular-nums'}}>
+                      <div style={{width:'80%',height:3,background:'var(--border)',borderRadius:2,overflow:'hidden'}}>
+                        <div style={{
+                          height:'100%',
+                          width:`${Math.round(displayProgress)}%`,
+                          background:'linear-gradient(90deg,#EC4899,#8B5CF6)',
+                          borderRadius:2,
+                          transition:'width 0.4s linear',
+                        }}/>
+                      </div>
+                      <div style={{fontSize:11,color:'var(--text-secondary)',fontVariantNumeric:'tabular-nums'}}>
                         {fmtElapsed(elapsed)}
                       </div>
                     </div>
@@ -3979,119 +5365,253 @@ ${shotsWithBeats.join('\n\n')}`
               )
             })}
           </div>
+          {!generating && genResults.length > 0 && (
+            <div style={{ display:'flex', justifyContent:'flex-end', marginTop:4 }}>
+              <button
+                onClick={() => { setGenResults([]); try { localStorage.removeItem(`hf_gen_results_${influencer.id}`) } catch {} }}
+                style={{ fontSize:11, fontWeight:600, color:'var(--text-tertiary)', background:'none', border:'none', cursor:'pointer', padding:'4px 2px', fontFamily:'inherit' }}
+              >Clear</button>
+            </div>
+          )}
         </div>
       )}
 
-      {/* Inspect prompt — lives in normal flow, above sticky footer */}
-      <div>
-        <button
-          onClick={()=>setShowPrompt(v=>!v)}
-          style={{
-            display:'flex',alignItems:'center',gap:7,
-            padding:'8px 14px',borderRadius:10,cursor:'pointer',
-            background: showPrompt ? 'rgba(139,92,246,0.1)' : 'var(--bg-tertiary)',
-            border: showPrompt ? '1.5px solid rgba(139,92,246,0.35)' : '1.5px solid var(--border)',
-            color: showPrompt ? '#8B5CF6' : 'var(--text-secondary)',
-            fontSize:12,fontWeight:600,transition:'all 0.15s',
-            boxShadow: showPrompt ? '0 0 0 3px rgba(139,92,246,0.08)' : 'none',
-          }}
-        >
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-            <polyline points="16 18 22 12 16 6"/>
-            <polyline points="8 6 2 12 8 18"/>
-          </svg>
-          <span>{showPrompt ? 'Hide prompt' : 'Inspect prompt'}</span>
-          <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" style={{opacity:0.5,transform: showPrompt ? 'rotate(180deg)' : 'rotate(0deg)',transition:'transform 0.15s'}}>
-            <polyline points="6 9 12 15 18 9"/>
-          </svg>
-        </button>
-        {showPrompt && (
-          <div style={{
-            marginTop:8,borderRadius:12,border:'1px solid var(--border)',
-            background:'var(--bg)',overflow:'hidden',
-          }}>
-            {lastGeneratedPrompt ? (
-              <>
-                <div style={{
-                  display:'flex',alignItems:'center',justifyContent:'space-between',
-                  padding:'8px 12px',borderBottom:'1px solid var(--border)',
-                  background:'var(--bg-tertiary)',
-                }}>
-                  <span style={{fontSize:11,color:'var(--text-tertiary)',fontWeight:500}}>
-                    Last generated prompt
-                  </span>
-                  <button
-                    onClick={()=>{
-                      navigator.clipboard.writeText(lastGeneratedPrompt).then(()=>{
-                        setCopied(true); setTimeout(()=>setCopied(false),2000)
-                      })
-                    }}
-                    style={{
-                      padding:'4px 12px',borderRadius:6,fontSize:11,fontWeight:600,
-                      background: copied ? 'rgba(34,197,94,0.12)' : 'var(--bg)',
-                      color: copied ? '#22C55E' : 'var(--text-secondary)',
-                      border: copied ? '1px solid rgba(34,197,94,0.3)' : '1px solid var(--border)',
-                      cursor:'pointer',transition:'all 0.15s',
-                    }}
-                  >{copied ? '✓ Copied' : 'Copy'}</button>
-                </div>
-                <pre style={{
-                  margin:0,padding:'14px 16px',fontSize:11.5,lineHeight:1.7,
-                  color:'var(--text-secondary)',whiteSpace:'pre-wrap',wordBreak:'break-word',
-                  fontFamily:'inherit',maxHeight:360,overflowY:'auto',
-                }}>{lastGeneratedPrompt}</pre>
-              </>
-            ) : (
-              <div style={{
-                padding:'22px 16px',textAlign:'center',
-                color:'var(--text-tertiary)',fontSize:12,lineHeight:1.6,
-              }}>
-                Generate a video or select a recent entry to inspect its prompt
-              </div>
-            )}
-          </div>
-        )}
-      </div>
-
-      {/* Sticky action footer */}
+      {/* Action footer */}
       <div style={{
-        position:'sticky',bottom:0,zIndex:10,
-        background:'var(--bg)',
-        paddingTop:10,paddingBottom:10,
         marginTop:4,
         borderTop:'1px solid var(--border-subtle)',
       }}>
+        {/* Collapsible prompt panel */}
+        {showPrompt && (
+          <div style={{
+            borderBottom:'1px solid var(--border-subtle)',
+            background:'var(--bg)',
+          }}>
+            <div style={{
+              display:'flex', alignItems:'center', justifyContent:'space-between',
+              padding:'10px 14px 6px',
+            }}>
+              <span style={{fontSize:11,fontWeight:700,color:'var(--text-tertiary)',textTransform:'uppercase',letterSpacing:'0.6px'}}>
+                Last generated prompt
+              </span>
+              <div style={{display:'flex',gap:6,alignItems:'center'}}>
+                <button
+                  onClick={()=>{ navigator.clipboard.writeText(lastGeneratedPrompt||'').then(()=>{ setCopied(true); setTimeout(()=>setCopied(false),2000) }) }}
+                  style={{
+                    padding:'3px 10px', borderRadius:6, fontSize:11, fontWeight:600,
+                    background: copied ? 'rgba(34,197,94,0.12)' : 'var(--bg-tertiary)',
+                    color: copied ? '#22C55E' : 'var(--text-secondary)',
+                    border: copied ? '1px solid rgba(34,197,94,0.3)' : '1px solid var(--border)',
+                    cursor:'pointer', transition:'all 0.15s',
+                  }}
+                >{copied ? '✓ Copied' : 'Copy'}</button>
+                <button onClick={()=>setShowPrompt(false)} style={{
+                  width:24, height:24, borderRadius:6, border:'none', cursor:'pointer',
+                  background:'var(--bg-tertiary)', color:'var(--text-tertiary)',
+                  display:'flex', alignItems:'center', justifyContent:'center', fontSize:14,
+                }}>×</button>
+              </div>
+            </div>
+            {lastGeneratedPrompt
+              ? <pre style={{
+                  margin:0, padding:'6px 14px 12px',
+                  fontSize:11.5, lineHeight:1.7, color:'var(--text-secondary)',
+                  whiteSpace:'pre-wrap', wordBreak:'break-word',
+                  fontFamily:'inherit', maxHeight:240, overflowY:'auto',
+                }}>{lastGeneratedPrompt}</pre>
+              : <div style={{padding:'10px 14px 14px',fontSize:12,color:'var(--text-tertiary)'}}>
+                  Generate a video first to inspect its prompt.
+                </div>
+            }
+          </div>
+        )}
 
-        {/* Action buttons */}
-        <div style={{display:'flex',gap:10}}>
-          <button
-            onClick={()=>openSaveModal(null)}
-            disabled={!canAct || generating}
-            style={{
-              flex:1,padding:'14px',borderRadius:14,fontSize:14,fontWeight:600,
-              background: saved ? 'rgba(52,199,89,0.12)' : (canAct && !generating ? 'rgba(139,92,246,0.1)' : 'transparent'),
-              color: saved ? '#34C759' : (canAct && !generating ? '#8B5CF6' : 'var(--text-tertiary)'),
-              border: saved ? '1.5px solid rgba(52,199,89,0.3)' : (canAct && !generating ? '1.5px solid rgba(139,92,246,0.3)' : '1.5px solid var(--bg-tertiary)'),
-              transition:'all 0.2s',
-            }}
-          >{saved ? '✓ Saved' : 'Save'}</button>
+        {/* Action row — [Random/Cancel] [Generate Video] [Save] [Inspect] */}
+        <div style={{padding:'10px', display:'flex', gap:8, alignItems:'center'}}>
+          {generating ? (
+            <button
+              onClick={() => {
+                cancelRef.current = true
+                clearPendingVideo(influencer.id)
+                clearInterval(elapsedRef.current)
+                setGenerating(false)
+                setGenProgress(0)
+                setElapsed(0)
+              }}
+              style={{
+                padding:'12px 18px', borderRadius:12, fontSize:13, fontWeight:600,
+                border:'1.5px solid rgba(255,59,48,0.35)', background:'rgba(255,59,48,0.08)',
+                color:'#FF3B30', cursor:'pointer', transition:'all 0.15s', fontFamily:'inherit',
+              }}
+            >Cancel</button>
+          ) : (
+            <button onClick={doVideoRandomize} style={{
+              padding:'12px 18px', borderRadius:12, fontSize:13, fontWeight:600,
+              border:'1.5px solid var(--border)', background:'var(--bg-tertiary)',
+              color:'var(--text-primary)', cursor:'pointer',
+              transition:'all 0.12s', fontFamily:'inherit',
+            }}>🎲 Random</button>
+          )}
           <button
             onClick={generate}
             disabled={!canAct || generating}
             style={{
-              flex:3,padding:'14px',borderRadius:14,fontSize:14,fontWeight:700,
-              background: canAct && !generating ? 'linear-gradient(135deg,#EC4899,#8B5CF6)' : 'var(--bg-tertiary)',
-              color: canAct && !generating ? '#fff' : 'var(--text-tertiary)',
-              border:'none',transition:'all 0.2s',letterSpacing:'-0.2px',
-              boxShadow: canAct && !generating ? '0 4px 24px rgba(139,92,246,0.35)' : 'none',
+              flex:1, padding:'12px 18px', borderRadius:12, fontSize:14, fontWeight:700,
+              background: generating ? 'rgba(139,92,246,0.12)' : (canAct ? 'linear-gradient(135deg,#EC4899,#8B5CF6)' : 'var(--bg-tertiary)'),
+              color: generating ? '#8B5CF6' : (canAct ? '#fff' : 'var(--text-tertiary)'),
+              border: generating ? '1.5px solid rgba(139,92,246,0.3)' : 'none',
+              cursor: (generating || !canAct) ? 'default' : 'pointer',
+              transition:'all 0.2s', letterSpacing:'-0.2px', fontFamily:'inherit',
+              boxShadow: (!generating && canAct) ? '0 4px 24px rgba(139,92,246,0.35)' : 'none',
             }}
           >
             {generating
-              ? (genResults.length > 0 ? `${genResults.length}/${outputs} ready · ${fmtElapsed(elapsed)}` : `Generating... ${fmtElapsed(elapsed)}`)
-              : <>{`✦ Generate${outputs > 1 ? ` ${outputs} Videos` : ' Video'}`}<span style={{fontSize:10,opacity:0.5,marginLeft:8,fontWeight:400}}>⌘↵</span></>
-            }
+              ? (genResults.length > 0 ? `${genResults.length}/${lockedOutputs} ready · ${fmtElapsed(elapsed)}` : `Generating… ${fmtElapsed(elapsed)}`)
+              : `✦ Generate${outputs > 1 ? ` ${outputs} Videos` : ' Video'}`}
+            {!generating && <span style={{fontSize:10,opacity:0.5,marginLeft:8,fontWeight:400}}>⌘↵</span>}
           </button>
+          {/* Save — appears only after generation completes */}
+          {genResults.length > 0 && (
+            <button
+              onClick={()=>openSaveModal(null)}
+              title={saved ? 'Saved' : 'Save script + videos'}
+              style={{
+                flexShrink:0, width:44, height:44, borderRadius:12, cursor:'pointer',
+                background: saved ? 'rgba(52,199,89,0.12)' : 'var(--bg-tertiary)',
+                border: saved ? '1.5px solid rgba(52,199,89,0.35)' : '1.5px solid var(--border)',
+                color: saved ? '#34C759' : 'var(--text-secondary)',
+                display:'flex', alignItems:'center', justifyContent:'center',
+                transition:'all 0.2s',
+              }}
+            >
+              {saved
+                ? <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+                : <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
+              }
+            </button>
+          )}
+          {/* Inspect — appears while generating or after */}
+          {(generating || genResults.length > 0) && (
+            <button
+              onClick={()=>setShowPrompt(v=>!v)}
+              title="Inspect prompt"
+              style={{
+                flexShrink:0, width:44, height:44, borderRadius:12, cursor:'pointer',
+                background: showPrompt ? 'rgba(139,92,246,0.12)' : 'var(--bg-tertiary)',
+                border: showPrompt ? '1.5px solid rgba(139,92,246,0.4)' : '1.5px solid var(--border)',
+                color: showPrompt ? '#8B5CF6' : 'var(--text-tertiary)',
+                display:'flex', alignItems:'center', justifyContent:'center',
+                transition:'all 0.15s', position:'relative',
+              }}
+            >
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                <polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/>
+              </svg>
+              {lastGeneratedPrompt && !showPrompt && (
+                <div style={{position:'absolute',top:7,right:7,width:5,height:5,borderRadius:'50%',background:'#8B5CF6'}}/>
+              )}
+            </button>
+          )}
         </div>
+
+        {/* ── Video history strip — below Generate button ── */}
+        {(() => {
+          const vids = (influencer.generationHistory || []).filter(e => e.type === 'video').slice(0, 40)
+          const skeletons = generating ? lockedOutputs : 0
+          return (
+            <div style={{ padding: '0 10px 10px' }}>
+              <style>{`@keyframes hf-pulse{0%,100%{opacity:0.45}50%{opacity:1}}@keyframes hf-spin{to{transform:rotate(360deg)}}`}</style>
+              <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: 8, display: 'flex', alignItems: 'center', gap: 8 }}>
+                <span style={{ flexShrink: 0 }}>History · {vids.length}</span>
+                {generating && (
+                  <span style={{ fontSize: 10, fontWeight: 600, color: '#8B5CF6', background: 'rgba(139,92,246,0.1)', padding: '2px 8px', borderRadius: 6, textTransform: 'none', letterSpacing: 0 }}>
+                    {genResults.length > 0 ? `${genResults.length}/${lockedOutputs} ready` : `Generating${lockedOutputs > 1 ? ` ${lockedOutputs} videos` : ''}…`}
+                  </span>
+                )}
+                {!generating && vids.length > 0 && (
+                  <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
+                    <button
+                      onClick={() => setSelectedVidIds(selectedVidIds.size === vids.length ? new Set() : new Set(vids.map(v => v.id)))}
+                      style={{
+                        padding: '4px 10px', borderRadius: 7, fontSize: 11, fontWeight: 600,
+                        background: selectedVidIds.size === vids.length ? 'rgba(139,92,246,0.1)' : 'var(--bg-tertiary)',
+                        color: selectedVidIds.size === vids.length ? '#8B5CF6' : 'var(--text-tertiary)',
+                        border: selectedVidIds.size === vids.length ? '1px solid rgba(139,92,246,0.3)' : '1px solid var(--border)',
+                        cursor: 'pointer', fontFamily: 'inherit',
+                      }}
+                    >{selectedVidIds.size === vids.length ? 'Deselect all' : 'Select all'}</button>
+                    {selectedVidIds.size > 0 && (
+                      <button
+                        onClick={async (e) => {
+                          e.stopPropagation()
+                          const items = vids.filter(v => selectedVidIds.has(v.id))
+                          await Promise.all(items.map(async (item, i) => {
+                            const filename = `video-${new Date(item.date).toISOString().slice(0,10)}-${i+1}.mp4`
+                            try {
+                              const res = await fetch(item.url)
+                              const blob = await res.blob()
+                              const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = filename; a.click()
+                            } catch {
+                              const a = document.createElement('a'); a.href = item.url; a.download = filename; a.target = '_blank'; a.click()
+                            }
+                          }))
+                        }}
+                        style={{ padding: '4px 10px', borderRadius: 7, fontSize: 11, fontWeight: 600, background: 'var(--bg-tertiary)', color: 'var(--text-secondary)', border: '1px solid var(--border)', cursor: 'pointer', fontFamily: 'inherit' }}
+                      >↓ {selectedVidIds.size}</button>
+                    )}
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        const ids = selectedVidIds.size > 0 ? selectedVidIds : new Set(vids.map(v => v.id))
+                        const count = ids.size
+                        setConfirmVidClear({
+                          label: selectedVidIds.size > 0 ? `Delete ${count} video${count !== 1 ? 's' : ''}` : `Clear all ${count} video${count !== 1 ? 's' : ''}`,
+                          onConfirm: () => {
+                            onUpdate({ generationHistory: (influencer.generationHistory || []).filter(ev => !ids.has(ev.id)) })
+                            setSelectedVidIds(new Set())
+                            setConfirmVidClear(null)
+                          },
+                        })
+                      }}
+                      style={{
+                        padding: '4px 10px', borderRadius: 7, fontSize: 11, fontWeight: 600,
+                        background: selectedVidIds.size > 0 ? 'rgba(255,59,48,0.08)' : 'var(--bg-tertiary)',
+                        color: selectedVidIds.size > 0 ? '#FF3B30' : 'var(--text-tertiary)',
+                        border: selectedVidIds.size > 0 ? '1px solid rgba(255,59,48,0.2)' : '1px solid var(--border)',
+                        cursor: 'pointer', fontFamily: 'inherit',
+                      }}
+                    >{selectedVidIds.size > 0 ? `Delete (${selectedVidIds.size})` : 'Clear all'}</button>
+                  </div>
+                )}
+              </div>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                {Array.from({ length: skeletons }).map((_, i) => (
+                  <div key={`skel-${i}`} style={{ width: 60, borderRadius: 9, overflow: 'hidden', outline: '2px solid rgba(139,92,246,0.28)', outlineOffset: -2 }}>
+                    <div style={{ width: '100%', height: 90, background: 'rgba(139,92,246,0.07)', display: 'flex', alignItems: 'center', justifyContent: 'center', animation: 'hf-pulse 1.6s ease-in-out infinite' }}>
+                      <div style={{ width: 18, height: 18, borderRadius: '50%', border: '2.5px solid rgba(139,92,246,0.2)', borderTopColor: '#8B5CF6', animation: 'hf-spin 0.75s linear infinite' }}/>
+                    </div>
+                    <div style={{ padding: '4px 6px', fontSize: 9, color: 'rgba(139,92,246,0.5)', fontWeight: 700, background: 'var(--surface)', letterSpacing: 1 }}>···</div>
+                  </div>
+                ))}
+                {vids.map((entry, i) => (
+                  <VideoStripThumb
+                    key={entry.id || i}
+                    entry={entry}
+                    isSelected={selectedVidIds.has(entry.id)}
+                    onToggle={() => setSelectedVidIds(prev => { const n = new Set(prev); n.has(entry.id) ? n.delete(entry.id) : n.add(entry.id); return n })}
+                    onReuse={(e) => { const s = e.settings ?? e; if (s && (s.vibe || s.dialogue || s.environment)) restoreHistory(s) }}
+                    onDelete={() => onUpdate({ generationHistory: (influencer.generationHistory || []).filter(e2 => e2.id !== entry.id) })}
+                  />
+                ))}
+                {!vids.length && !generating && (
+                  <div style={{ width: '100%', padding: '18px 0 6px', textAlign: 'center', color: 'var(--text-tertiary)', fontSize: 12 }}>
+                    No videos yet — generate your first above
+                  </div>
+                )}
+              </div>
+            </div>
+          )
+        })()}
       </div>
 
       {/* Video gallery */}
@@ -4160,6 +5680,36 @@ ${shotsWithBeats.join('\n\n')}`
           />
         </div>
       )}
+
+      {/* ── Wardrobe drawer ── */}
+      {csWardrobeOpen && (
+        <WardrobeDrawer
+          influencer={influencer}
+          pendingResult={csWardrobePending}
+          onResult={handleCsWardrobeResult}
+          onClose={() => setCsWardrobeOpen(false)}
+          onSave={slot => {
+            onUpdate({ wardrobeSlots: [...(influencer.wardrobeSlots || []), slot] })
+            setCsWardrobeOpen(false)
+          }}
+        />
+      )}
+
+      {confirmVidClear && createPortal(
+        <div style={{ position: 'fixed', inset: 0, zIndex: 10000, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,0.55)', backdropFilter: 'blur(4px)' }}
+          onClick={() => setConfirmVidClear(null)}>
+          <div onClick={e => e.stopPropagation()} style={{ background: 'var(--surface)', borderRadius: 16, padding: '28px 32px', maxWidth: 340, width: '90%', boxShadow: '0 24px 64px rgba(0,0,0,0.5)', border: '1px solid var(--border)', textAlign: 'center' }}>
+            <div style={{ fontSize: 32, marginBottom: 12 }}>🗑️</div>
+            <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--text-primary)', marginBottom: 8 }}>{confirmVidClear.label}?</div>
+            <div style={{ fontSize: 13, color: 'var(--text-secondary)', marginBottom: 24 }}>This cannot be undone.</div>
+            <div style={{ display: 'flex', gap: 10, justifyContent: 'center' }}>
+              <button onClick={() => setConfirmVidClear(null)} style={{ flex: 1, padding: '10px 0', borderRadius: 10, fontSize: 13, fontWeight: 600, background: 'var(--bg-tertiary)', color: 'var(--text-secondary)', border: '1px solid var(--border)', cursor: 'pointer', fontFamily: 'inherit' }}>Cancel</button>
+              <button onClick={confirmVidClear.onConfirm} style={{ flex: 1, padding: '10px 0', borderRadius: 10, fontSize: 13, fontWeight: 700, background: '#FF3B30', color: '#fff', border: 'none', cursor: 'pointer', fontFamily: 'inherit' }}>Delete</button>
+            </div>
+          </div>
+        </div>,
+        document.body
+      )}
     </div>
   )
 }
@@ -4171,9 +5721,12 @@ export default function Influencers() {
   const { isDark } = useTheme()
   const location = useLocation()
   const navigate = useNavigate()
-  const [selectedId,setSelectedId]=useState(null)
-  const [studioTab,setStudioTab]=useState(() => localStorage.getItem('inf_studio_tab') || 'influencer')
+  const [selectedId,setSelectedId]=useState(()=>localStorage.getItem('inf_last_selected')||null)
+  const [studioTab,setStudioTab]=useState('influencer')
   const [activeTab,setActiveTab]=useState('Overview')
+  const [videoRestoreKey, setVideoRestoreKey] = useState(0)
+  const [photoRestoreKey, setPhotoRestoreKey] = useState(0)
+  const [pendingStartFrame, setPendingStartFrame] = useState(null)
   const [showNew,setShowNew]=useState(false)
   const [lightbox,setLightbox]=useState(null)
   const [ctxMenu,setCtxMenu]=useState(null)
@@ -4189,8 +5742,14 @@ export default function Influencers() {
   const dragStartW=useRef(0)
   const isMobile=useMobile()
   const tabSecRef=useRef()
+  const mainPaneRef=useRef()
   const [scriptsHighlightId,setScriptsHighlightId]=useState(null)
   const hasNavigatedToScripts=useRef(false)
+  const prevInfIdRef=useRef(null)
+  const currentTabsRef=useRef({ studioTab, activeTab })
+  const [infOrder,setInfOrder]=useState(()=>{try{return JSON.parse(localStorage.getItem('inf_order')||'null')}catch{return null}})
+  const [dragState,setDragState]=useState(null) // {srcId, overId, above}
+  const orderedRef=useRef([])
 
   // Resize drag handlers — pure DOM during drag, sync to React on mouseup
   useEffect(()=>{
@@ -4232,8 +5791,17 @@ export default function Influencers() {
   const ac=accent(influencer)
   const pct=influencer?completeness(influencer):0
 
-  // Reset to Influencer Studio when switching influencers
-  useEffect(() => { setStudioTab('influencer'); setScriptsHighlightId(null); hasNavigatedToScripts.current=false }, [influencer?.id]) // eslint-disable-line
+  // Keep currentTabsRef current so the switch useEffect can read tabs before restoring
+  currentTabsRef.current = { studioTab, activeTab }
+
+  // Reset to profile tab on every influencer switch
+  useEffect(() => {
+    prevInfIdRef.current = influencer?.id
+    setStudioTab('influencer')
+    setActiveTab('Overview')
+    setScriptsHighlightId(null)
+    hasNavigatedToScripts.current = false
+  }, [influencer?.id]) // eslint-disable-line
 
   const topImages=influencer?[influencer.mainImage,influencer.characterSheetImage,influencer.closeUpImage1,influencer.closeUpImage2].filter(Boolean):[]
 
@@ -4255,6 +5823,16 @@ export default function Influencers() {
   }
 
   function upd(id,updates){ setInfluencers(prev=>prev.map(i=>i.id===id?{...i,...updates}:i)) }
+
+  function addToHistory(id, entry) {
+    setInfluencers(prev => prev.map(i => {
+      if (i.id !== id) return i
+      const existing = i.generationHistory || []
+      const isDupe = existing.some(e => e.url === entry.url && entry.date - e.date < 10000)
+      if (isDupe) return i
+      return { ...i, generationHistory: [{ id: generateId(), ...entry }, ...existing].slice(0, 300) }
+    }))
+  }
 
   function handleSaveToScripts(scriptId) {
     if (hasNavigatedToScripts.current) return
@@ -4328,55 +5906,150 @@ export default function Influencers() {
           {influencers.length===0&&(
             <div style={{padding:'24px 8px',textAlign:'center',color:SD.dim,fontSize:13}}>No influencers yet</div>
           )}
-          {[...influencers].sort((a,b)=>(b.createdAt||0)-(a.createdAt||0)).map(inf=>{
+          {(()=>{
+            const ordered = infOrder
+              ? [...infOrder.map(id=>influencers.find(i=>i.id===id)).filter(Boolean),
+                 ...influencers.filter(i=>!infOrder.includes(i.id))]
+              : [...influencers].sort((a,b)=>(b.createdAt||0)-(a.createdAt||0))
+            orderedRef.current = ordered
+
+            function applyDrop(srcId, overId, above) {
+              if (!srcId || srcId === overId) return
+              const ids = orderedRef.current.map(i=>i.id)
+              const from = ids.indexOf(srcId)
+              if (from === -1) return
+              const next = [...ids]
+              next.splice(from, 1)
+              const to = next.indexOf(overId)
+              if (to === -1) return
+              next.splice(above ? to : to + 1, 0, srcId)
+              setInfOrder(next)
+              localStorage.setItem('inf_order', JSON.stringify(next))
+            }
+
+            const ROW_H = 62
+            function getShift(infId) {
+              if (!dragState?.overId) return 0
+              const { srcId, overId, above } = dragState
+              if (infId === srcId) return 0
+              const srcIdx = ordered.findIndex(i => i.id === srcId)
+              const overIdx = ordered.findIndex(i => i.id === overId)
+              const thisIdx = ordered.findIndex(i => i.id === infId)
+              const insertAt = above ? overIdx : overIdx + 1
+              if (srcIdx < insertAt) {
+                if (thisIdx > srcIdx && thisIdx < insertAt) return -ROW_H
+              } else {
+                if (thisIdx >= insertAt && thisIdx < srcIdx) return ROW_H
+              }
+              return 0
+            }
+
+            return ordered.map(inf=>{
             const pct=completeness(inf)
             const active=influencer?.id===inf.id
             const gc=gColor(inf.gender)
+            const isDraggingThis = dragState?.srcId === inf.id
+            const dragDy = isDraggingThis && dragState?.pointerY != null ? dragState.pointerY - dragState.startY : 0
+            const shift = isDraggingThis ? dragDy : getShift(inf.id)
             return (
-              <button key={inf.id}
-                onClick={()=>{
-                  setSelectedId(inf.id)
-                  if(location.state?.selectId) navigate('/influencers',{replace:true,state:{}})
-                  if(isMobile)setMobileView('detail')
+              <div key={inf.id} data-inf-id={inf.id} style={{width:'100%',transform:`translateY(${shift}px)`,transition:(dragState&&!isDraggingThis)?'transform 0.18s ease':'none',position:'relative',zIndex:isDraggingThis?99:1,pointerEvents:isDraggingThis?'none':'auto'}}>
+                <div style={{
+                  display:'flex',alignItems:'center',borderRadius:10,marginBottom:2,
+                  opacity: 1,
+                  background: active ? SD.active : 'transparent',
+                  cursor: dragState ? (isDraggingThis ? 'grabbing' : 'default') : 'grab',
+                  userSelect:'none',
+                  boxShadow: isDraggingThis ? '0 8px 28px rgba(0,0,0,0.55)' : 'none',
+                  transform: isDraggingThis ? 'scale(1.03)' : 'none',
+                  transition: isDraggingThis ? 'box-shadow 0.1s,transform 0.1s' : 'none',
                 }}
-                onContextMenu={e=>openCtx(e,inf.id)}
-                style={{
-                  width:'100%',padding:'10px',borderRadius:10,textAlign:'left',
-                  background:active?SD.active:'transparent',
-                  marginBottom:2,display:'flex',alignItems:'center',gap:10,
-                  transition:'background 0.15s',
-                }}
-                onMouseEnter={e=>{ if(!active) e.currentTarget.style.background=SD.hover }}
-                onMouseLeave={e=>{ if(!active) e.currentTarget.style.background='transparent' }}
-              >
-                {/* Avatar + ring */}
-                <div style={{position:'relative',width:40,height:40,flexShrink:0}}>
-                  <Ring pct={pct} size={42}/>
-                  <div style={{position:'absolute',top:3,left:3,width:34,height:34,borderRadius:inf.mainImage?'50%':8,overflow:'hidden',background:'rgba(255,255,255,0.08)',display:'flex',alignItems:'center',justifyContent:'center',transition:'border-radius 0.2s'}}>
-                    {inf.mainImage
-                      ?<img src={inf.mainImage} alt="" style={{width:'100%',height:'100%',objectFit:'cover'}}/>
-                      :<span style={{fontSize:14,fontWeight:700,color:SD.dim}}>{inf.name[0]?.toUpperCase()}</span>
+                  onPointerDown={e=>{
+                    if (e.button !== 0) return
+                    const srcId = inf.id
+                    const startX = e.clientX, startY = e.clientY
+                    let dragging = false
+                    function onMove(ev){
+                      if (!dragging) {
+                        const dx = ev.clientX - startX, dy = ev.clientY - startY
+                        if (dx*dx + dy*dy < 64) return
+                        dragging = true
+                        setDragState({srcId, overId:null, above:true, startY, pointerY: ev.clientY})
+                        return
+                      }
+                      const el=document.elementFromPoint(ev.clientX,ev.clientY)
+                      const row=el?.closest('[data-inf-id]')
+                      const pointerY = ev.clientY
+                      if(!row){setDragState(s=>s?{...s,overId:null,pointerY}:s);return}
+                      const overId=row.dataset.infId
+                      if(overId===srcId){setDragState(s=>s?{...s,overId:null,pointerY}:s);return}
+                      const rect=row.getBoundingClientRect()
+                      const above=ev.clientY<rect.top+rect.height/2
+                      setDragState(s=>s?{...s,overId,above,pointerY}:s)
                     }
-                  </div>
+                    function onUp(){
+                      if (dragging) {
+                        setDragState(s=>{
+                          if(s?.overId) applyDrop(s.srcId,s.overId,s.above)
+                          return null
+                        })
+                      }
+                      window.removeEventListener('pointermove',onMove)
+                      window.removeEventListener('pointerup',onUp)
+                    }
+                    window.addEventListener('pointermove',onMove)
+                    window.addEventListener('pointerup',onUp)
+                  }}
+                >
+                  <button
+                    onClick={()=>{
+                      setSelectedId(inf.id)
+                      localStorage.setItem('inf_last_selected', inf.id)
+                      if(location.state?.selectId) navigate('/influencers',{replace:true,state:{}})
+                      if(isMobile)setMobileView('detail')
+                    }}
+                    onContextMenu={e=>openCtx(e,inf.id)}
+                    style={{
+                      flex:1,padding:'10px 10px 10px 10px',borderRadius:10,textAlign:'left',
+                      background:'transparent',
+                      display:'flex',alignItems:'center',gap:10,
+                      transition:'background 0.15s',
+                      pointerEvents: dragState ? 'none' : 'auto',
+                    }}
+                    onMouseEnter={e=>{ if(!active&&!dragState) e.currentTarget.style.background=SD.hover }}
+                    onMouseLeave={e=>{ if(!active) e.currentTarget.style.background='transparent' }}
+                  >
+                    {/* Avatar + ring */}
+                    <div style={{position:'relative',width:40,height:40,flexShrink:0}}>
+                      <Ring pct={pct} size={42}/>
+                      <div style={{position:'absolute',top:3,left:3,width:34,height:34,borderRadius:inf.mainImage?'50%':8,overflow:'hidden',background:'rgba(255,255,255,0.08)',display:'flex',alignItems:'center',justifyContent:'center',transition:'border-radius 0.2s'}}>
+                        {inf.mainImage
+                          ?<img src={inf.mainImage} alt="" style={{width:'100%',height:'100%',objectFit:'cover'}}/>
+                          :<span style={{fontSize:14,fontWeight:700,color:SD.dim}}>{inf.name[0]?.toUpperCase()}</span>
+                        }
+                      </div>
+                    </div>
+                    {/* Name + gender */}
+                    <div style={{minWidth:0,flex:1}}>
+                      {renameId===inf.id?(
+                        <input autoFocus value={renameVal} onChange={e=>setRenameVal(e.target.value)}
+                          onBlur={commitRename}
+                          onKeyDown={e=>{if(e.key==='Enter')commitRename();if(e.key==='Escape')setRenameId(null)}}
+                          onClick={e=>e.stopPropagation()}
+                          style={{fontSize:13,fontWeight:600,border:'none',background:'transparent',color:SD.text,outline:'none',width:'100%'}}/>
+                      ):(
+                        <div style={{fontSize:13,fontWeight:600,color:SD.text,whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}}>{inf.name}</div>
+                      )}
+                      <div style={{fontSize:11,color:inf.tag?'rgba(139,92,246,0.75)':inf.gender?gc:SD.dim,marginTop:1,whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}}>
+                        {inf.tag || inf.gender || 'Influencer'}
+                      </div>
+                    </div>
+                    {/* Pct badge */}
+                    <div style={{fontSize:10,fontWeight:700,color:SD.dim,flexShrink:0}}>{pct}%</div>
+                  </button>
                 </div>
-                {/* Name + gender */}
-                <div style={{minWidth:0,flex:1}}>
-                  {renameId===inf.id?(
-                    <input autoFocus value={renameVal} onChange={e=>setRenameVal(e.target.value)}
-                      onBlur={commitRename}
-                      onKeyDown={e=>{if(e.key==='Enter')commitRename();if(e.key==='Escape')setRenameId(null)}}
-                      onClick={e=>e.stopPropagation()}
-                      style={{fontSize:13,fontWeight:600,border:'none',background:'transparent',color:SD.text,outline:'none',width:'100%'}}/>
-                  ):(
-                    <div style={{fontSize:13,fontWeight:600,color:SD.text,whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}}>{inf.name}</div>
-                  )}
-                  <div style={{fontSize:11,color:inf.gender?gc:SD.dim,marginTop:1}}>{inf.gender||'Influencer'}</div>
-                </div>
-                {/* Pct badge */}
-                <div style={{fontSize:10,fontWeight:700,color:SD.dim,flexShrink:0}}>{pct}%</div>
-              </button>
+              </div>
             )
-          })}
+          })})()}
         </div>
       </aside>}
 
@@ -4416,7 +6089,7 @@ export default function Influencers() {
 
       {/* ── Main — hidden on mobile when viewing list */}
       {(!isMobile || mobileView==='detail') && (influencer ? (
-        <main style={{flex:1,overflow:'auto',padding:isMobile?'14px 16px':'20px 24px',display:'flex',flexDirection:'column',gap:14,backgroundImage:'radial-gradient(ellipse at 75% 0%, rgba(0,113,227,0.04) 0%, transparent 55%)'}}>
+        <main ref={mainPaneRef} style={{flex:1,overflow:'auto',padding:isMobile?'14px 16px':'20px 24px',display:'flex',flexDirection:'column',gap:14,backgroundImage:'radial-gradient(ellipse at 75% 0%, rgba(0,113,227,0.04) 0%, transparent 55%)'}}>
           {/* Mobile back button */}
           {isMobile&&(
             <button onClick={()=>setMobileView('list')} style={{
@@ -4447,20 +6120,58 @@ export default function Influencers() {
                 color: studioTab==='influencer' ? 'var(--text-primary)' : 'var(--text-tertiary)',
                 boxShadow: studioTab==='influencer' ? '0 1px 6px rgba(0,0,0,0.10), 0 0 0 1px var(--border-subtle)' : 'none',
                 transition:'all 0.18s',
-              }}>Influencer Studio</button>
+              }}>Profile</button>
+              <button onClick={()=>{ setStudioTab('photo'); localStorage.setItem('inf_studio_tab','photo') }} style={{
+                padding:'9px 22px',borderRadius:10,fontSize:13,fontWeight:600,border:'none',
+                background: studioTab==='photo' ? 'var(--surface)' : 'transparent',
+                color: studioTab==='photo' ? 'var(--text-primary)' : 'var(--text-tertiary)',
+                boxShadow: studioTab==='photo' ? '0 1px 6px rgba(0,0,0,0.10), 0 0 0 1px var(--border-subtle)' : 'none',
+                transition:'all 0.18s',
+              }}>Photos</button>
               <button onClick={()=>{ setStudioTab('content'); localStorage.setItem('inf_studio_tab','content') }} style={{
                 padding:'9px 22px',borderRadius:10,fontSize:13,fontWeight:600,border:'none',
                 background: studioTab==='content' ? 'linear-gradient(135deg,#EC4899,#8B5CF6)' : 'transparent',
                 color: studioTab==='content' ? '#fff' : 'var(--text-tertiary)',
                 boxShadow: studioTab==='content' ? '0 2px 14px rgba(139,92,246,0.35)' : 'none',
                 transition:'all 0.18s',
-              }}>Content Studio</button>
+              }}>Videos</button>
             </div>
           </div>
 
-          {studioTab==='content' && (
-            <ContentStudio influencer={influencer} onUpdate={v=>upd(influencer.id,v)} onSaveToScripts={handleSaveToScripts}/>
-          )}
+
+
+          <div style={{ display: studioTab==='content' ? 'block' : 'none' }}>
+            <ContentStudio key={influencer.id} influencer={influencer} onUpdate={v=>upd(influencer.id,v)} onSaveToScripts={handleSaveToScripts} restoreKey={videoRestoreKey}
+              pendingStartFrame={pendingStartFrame} onStartFrameConsumed={()=>setPendingStartFrame(null)}
+              onGenerated={(urls, settings)=>{
+                const now = Date.now()
+                const unique = [...new Set(urls.filter(Boolean))]
+                if (!unique.length) return
+                setInfluencers(prev => prev.map(inf => {
+                  if (inf.id !== influencer.id) return inf
+                  const existing = inf.generationHistory || []
+                  const fresh = unique
+                    .filter(url => !existing.some(e => e.url === url && now - e.date < 30000))
+                    .map((url, i) => ({ id: generateId(), type: 'video', label: unique.length > 1 ? `Video ${i+1}` : 'Video', url, date: now, settings }))
+                  if (!fresh.length) return inf
+                  return { ...inf, generationHistory: [...fresh, ...existing].slice(0, 300) }
+                }))
+              }}/>
+          </div>
+
+          <div style={{ display: studioTab==='photo' ? 'block' : 'none' }}>
+            <PhotoStudioPanel influencer={influencer} restoreKey={photoRestoreKey} onGoToWardrobe={() => {
+              setStudioTab('influencer')
+              localStorage.setItem('inf_studio_tab', 'influencer')
+              setActiveTab('Wardrobe')
+              setTimeout(() => tabSecRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 120)
+            }} onUseAsStartFrame={url => {
+              setPendingStartFrame(url)
+              setStudioTab('content')
+              localStorage.setItem('inf_studio_tab', 'content')
+              setTimeout(() => mainPaneRef.current?.scrollTo({ top: 0, behavior: 'smooth' }), 50)
+            }} />
+          </div>
 
           {studioTab==='influencer' && <>
 
@@ -4497,21 +6208,22 @@ export default function Influencers() {
           )}
 
           {/* Hero banner */}
-          <HeroBanner influencer={influencer} pct={pct} onDelete={()=>del(influencer.id)}/>
+          <HeroBanner influencer={influencer} pct={pct} onDelete={()=>del(influencer.id)} onUpdate={v=>upd(influencer.id,v)}/>
 
           {/* Three image sections */}
           <Sec>
             <div className="inf-img-grid">
               <div>
                 <div style={{fontSize:11,fontWeight:700,textTransform:'uppercase',letterSpacing:'0.5px',color:'var(--text-secondary)',marginBottom:8}}>Image</div>
-                <MainImageSlot influencer={influencer} onChange={v=>upd(influencer.id,{mainImage:v})}
+                <MainImageSlot key={influencer.id} influencer={influencer} onChange={v=>upd(influencer.id,{mainImage:v})}
                   onLightbox={()=>setLightbox({images:topImages,index:topImages.indexOf(influencer.mainImage)})}/>
               </div>
               <div>
                 <div style={{fontSize:11,fontWeight:700,textTransform:'uppercase',letterSpacing:'0.5px',color:'var(--text-secondary)',marginBottom:8}}>Character Sheet</div>
                 <CharacterSheetSlot
+                  key={influencer.id}
                   influencer={influencer}
-                  onSave={v=>upd(influencer.id,{characterSheetImage:v})}
+                  onSave={v=>{upd(influencer.id,{characterSheetImage:v});if(v){addToHistory(influencer.id,{type:'image',label:'Character Sheet',url:v,date:Date.now()})}}}
                   onLightbox={()=>setLightbox({images:topImages,index:topImages.indexOf(influencer.characterSheetImage)})}
                 />
               </div>
@@ -4519,13 +6231,15 @@ export default function Influencers() {
                 <div style={{fontSize:11,fontWeight:700,textTransform:'uppercase',letterSpacing:'0.5px',color:'var(--text-secondary)',marginBottom:8}}>Close Ups</div>
                 <div style={{display:'flex',flexDirection:'column',gap:8}}>
                   <CloseUpSlot
+                    key={`${influencer.id}-cu1`}
                     influencer={influencer} imageKey="closeUpImage1" label="Close up 1"
-                    onSave={v=>upd(influencer.id,{closeUpImage1:v})}
+                    onSave={v=>{upd(influencer.id,{closeUpImage1:v});if(v)addToHistory(influencer.id,{type:'image',label:'Close Up',url:v,date:Date.now()})}}
                     onLightbox={()=>setLightbox({images:topImages,index:topImages.indexOf(influencer.closeUpImage1)})}
                   />
                   <CloseUpSlot
+                    key={`${influencer.id}-cu2`}
                     influencer={influencer} imageKey="closeUpImage2" label="Feature sheet"
-                    onSave={v=>upd(influencer.id,{closeUpImage2:v})}
+                    onSave={v=>{upd(influencer.id,{closeUpImage2:v});if(v)addToHistory(influencer.id,{type:'image',label:'Feature Sheet',url:v,date:Date.now()})}}
                     onLightbox={()=>setLightbox({images:topImages,index:topImages.indexOf(influencer.closeUpImage2)})}
                     promptFn={buildFeatureSheetPrompt}
                     genAspectRatio="2:3"
@@ -4560,7 +6274,10 @@ export default function Influencers() {
             {activeTab==='Wardrobe' && (<>
               <WardrobeGenerator
                 influencer={influencer}
-                onAdd={slot => upd(influencer.id, { wardrobeSlots: [...(influencer.wardrobeSlots??[]), slot] })}
+                onAdd={slot => {
+                  upd(influencer.id, { wardrobeSlots: [...(influencer.wardrobeSlots??[]), slot] })
+                  if (slot.image) addToHistory(influencer.id, { type: 'image', label: `Wardrobe – ${slot.name}`, url: slot.image, date: Date.now() })
+                }}
               />
               <WorldDropSection drops={influencer.wardrobeSlots??[]} onChange={slots=>upd(influencer.id,{wardrobeSlots:slots})}/>
             </>)}
@@ -4569,6 +6286,10 @@ export default function Influencers() {
             )}
             {activeTab==='Brand Deals' && (
               <BrandDealSection deals={influencer.brandDeals??[]} onChange={deals=>upd(influencer.id,{brandDeals:deals})}/>
+            )}
+            {activeTab==='History' && (
+              <HistoryTab influencer={influencer} onUpdate={v=>upd(influencer.id,v)}
+                onReuseSettings={(seg)=>{ if (seg === 'videos') { setStudioTab('content'); localStorage.setItem('inf_studio_tab','content'); setVideoRestoreKey(k => k+1) } else { setStudioTab('photo'); localStorage.setItem('inf_studio_tab','photo'); setPhotoRestoreKey(k => k+1) } }}/>
             )}
 
           </Sec></div>

@@ -96,7 +96,7 @@ export default function Nav() {
           transition: 'all 0.15s',
         })}>+ Create</NavLink>
 
-<NavLink to="/settings" title="Settings" style={({ isActive }) => ({
+        <NavLink to="/settings" title="Settings" style={({ isActive }) => ({
           width: 40, height: 40, borderRadius: 10, display: 'flex', alignItems: 'center', justifyContent: 'center',
           background: isActive
             ? (dark ? 'rgba(255,255,255,0.12)' : 'var(--bg-tertiary)')

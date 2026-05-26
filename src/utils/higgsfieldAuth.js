@@ -143,15 +143,26 @@ export async function refreshHFToken() {
   const clientId = localStorage.getItem('hf_client_id')
   if (!refreshToken || !clientId) throw new Error('No refresh token — please reconnect in Settings')
 
-  const res = await fetch(`${AUTH_PROXY}/oauth2/token`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: new URLSearchParams({
-      grant_type: 'refresh_token',
-      refresh_token: refreshToken,
-      client_id: clientId,
-    }),
-  })
+  const controller = new AbortController()
+  const timeout = setTimeout(() => controller.abort(), 15000)
+  let res
+  try {
+    res = await fetch(`${AUTH_PROXY}/oauth2/token`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        grant_type: 'refresh_token',
+        refresh_token: refreshToken,
+        client_id: clientId,
+      }),
+      signal: controller.signal,
+    })
+  } catch (e) {
+    disconnectHF()
+    throw new Error('Session expired — please reconnect in Settings')
+  } finally {
+    clearTimeout(timeout)
+  }
   if (!res.ok) {
     disconnectHF()
     throw new Error('Session expired — please reconnect in Settings')

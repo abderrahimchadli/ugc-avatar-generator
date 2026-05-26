@@ -1,14 +1,10 @@
 import { useState, useRef } from 'react'
 import { useBrandDeals, generateId } from '../store'
-import { compressImage } from '../utils/imageUtils'
+import { compressImage, downloadImage } from '../utils/imageUtils'
+import { generateSingleImage } from '../utils/higgsfieldGenerate'
+import { isHFConnected } from '../utils/higgsfieldAuth'
+import { buildCharSheetPrompt, buildCharSheetPromptWithClaude } from '../utils/charSheetPrompt'
 import Lightbox from '../components/Lightbox'
-
-function downloadImage(src, filename) {
-  const a = document.createElement('a')
-  a.href = src
-  a.download = filename
-  a.click()
-}
 
 function NewDealModal({ onClose, onSave }) {
   const [brand, setBrand] = useState('')
@@ -119,7 +115,7 @@ function NewDealModal({ onClose, onSave }) {
   )
 }
 
-function DealCard({ deal, onDelete, onOpen, onRename }) {
+function DealCard({ deal, generating, progress, onDelete, onOpen, onRename, onGenerate }) {
   const [editing, setEditing] = useState(false)
   const [name, setName] = useState(deal.brand)
 
@@ -130,34 +126,82 @@ function DealCard({ deal, onDelete, onOpen, onRename }) {
     setEditing(false)
   }
 
+  const displayImage = deal.characterSheet || deal.image
+  const hasSheet = !!deal.characterSheet
+
   return (
     <div
-      onClick={() => !editing && deal.image && onOpen()}
       style={{
         background: 'var(--surface)',
         borderRadius: 'var(--radius-lg)',
         overflow: 'hidden',
         boxShadow: 'var(--shadow-sm)',
-        border: '1px solid var(--border-subtle)',
+        border: hasSheet ? '1px solid rgba(139,92,246,0.25)' : '1px solid var(--border-subtle)',
         transition: 'box-shadow 0.18s, transform 0.18s',
-        cursor: deal.image && !editing ? 'zoom-in' : 'default',
       }}
       onMouseEnter={e => { e.currentTarget.style.boxShadow = 'var(--shadow-md)'; e.currentTarget.style.transform = 'translateY(-2px)' }}
       onMouseLeave={e => { e.currentTarget.style.boxShadow = 'var(--shadow-sm)'; e.currentTarget.style.transform = 'translateY(0)' }}
     >
-      <div style={{ aspectRatio: '16/9', background: 'var(--bg-tertiary)', overflow: 'hidden' }}>
-        {deal.image
-          ? <img src={deal.image} alt={deal.brand} style={{ width: '100%', height: '100%', objectFit: 'cover', transition: 'transform 0.3s', display: 'block' }}
-              onMouseEnter={e => e.currentTarget.style.transform = 'scale(1.04)'}
+      {/* Image area */}
+      <div
+        onClick={() => !editing && displayImage && !generating && onOpen()}
+        style={{
+          aspectRatio: '16/9',
+          background: 'var(--bg-tertiary)',
+          overflow: 'hidden',
+          position: 'relative',
+          cursor: displayImage && !generating ? 'zoom-in' : 'default',
+        }}
+      >
+        {displayImage
+          ? <img
+              src={displayImage}
+              alt={deal.brand}
+              style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block', transition: 'transform 0.3s' }}
+              onMouseEnter={e => { if (!generating) e.currentTarget.style.transform = 'scale(1.04)' }}
               onMouseLeave={e => e.currentTarget.style.transform = 'scale(1)'}
             />
           : <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
               <span style={{ fontSize: 32, fontWeight: 800, color: 'var(--text-tertiary)', opacity: 0.3 }}>{deal.brand[0]}</span>
             </div>
         }
+
+        {/* Generating overlay */}
+        {generating && (
+          <div style={{
+            position: 'absolute', inset: 0,
+            background: 'rgba(0,0,0,0.62)',
+            display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 10,
+          }}>
+            <div style={{
+              width: 28, height: 28, borderRadius: '50%',
+              border: '2.5px solid rgba(255,255,255,0.2)',
+              borderTopColor: '#fff',
+              animation: 'spin 0.75s linear infinite',
+            }} />
+            <div style={{ color: '#fff', fontSize: 12, fontWeight: 600 }}>
+              {progress < 10 ? 'Asking Claude…' : progress < 25 ? 'Uploading…' : 'Generating…'}
+            </div>
+            <div style={{ color: 'rgba(255,255,255,0.5)', fontSize: 11 }}>{Math.round(progress)}%</div>
+          </div>
+        )}
+
+        {/* Sheet badge */}
+        {hasSheet && !generating && (
+          <div style={{
+            position: 'absolute', top: 8, right: 8,
+            background: 'rgba(139,92,246,0.85)', color: '#fff',
+            fontSize: 10, fontWeight: 700, letterSpacing: '0.3px',
+            padding: '3px 7px', borderRadius: 6,
+            backdropFilter: 'blur(4px)',
+          }}>
+            SHEET
+          </div>
+        )}
       </div>
 
-      <div style={{ padding: '14px 16px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+      {/* Info row */}
+      <div style={{ padding: '12px 14px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
         <div style={{ flex: 1, minWidth: 0 }}>
           {editing ? (
             <input
@@ -167,32 +211,61 @@ function DealCard({ deal, onDelete, onOpen, onRename }) {
               onClick={e => e.stopPropagation()}
               onBlur={commitRename}
               onKeyDown={e => { if (e.key === 'Enter') commitRename(); if (e.key === 'Escape') { setName(deal.brand); setEditing(false) } }}
-              style={{ fontSize: 15, fontWeight: 700, border: 'none', background: 'transparent', color: 'var(--text-primary)', outline: 'none', width: '100%' }}
+              style={{ fontSize: 14, fontWeight: 700, border: 'none', background: 'transparent', color: 'var(--text-primary)', outline: 'none', width: '100%' }}
             />
           ) : (
-            <div style={{ fontWeight: 700, fontSize: 15, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{deal.brand}</div>
+            <div style={{ fontWeight: 700, fontSize: 14, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{deal.brand}</div>
           )}
-          {deal.category && <div style={{ fontSize: 12, color: 'var(--text-tertiary)', marginTop: 2 }}>{deal.category}</div>}
+          {deal.category && <div style={{ fontSize: 11, color: 'var(--text-tertiary)', marginTop: 2 }}>{deal.category}</div>}
         </div>
-        <div style={{ display: 'flex', gap: 6, flexShrink: 0 }} onClick={e => e.stopPropagation()}>
+
+        <div style={{ display: 'flex', gap: 5, flexShrink: 0, alignItems: 'center' }} onClick={e => e.stopPropagation()}>
+          {/* Rename */}
           <button
-            title="Rename"
+            disabled={generating}
             onClick={() => setEditing(true)}
-            style={{ padding: '4px 8px', borderRadius: 6, fontSize: 12, color: 'var(--text-secondary)', background: 'var(--bg-tertiary)' }}
+            style={{ padding: '4px 8px', borderRadius: 6, fontSize: 11, color: 'var(--text-secondary)', background: 'var(--bg-tertiary)', opacity: generating ? 0.4 : 1 }}
           >Rename</button>
-          {deal.image && (
-            <button
-              title="Download"
-              onClick={() => downloadImage(deal.image, `${deal.brand}.jpg`)}
-              style={{ width: 28, height: 28, borderRadius: '50%', background: 'var(--bg-tertiary)', color: 'var(--text-secondary)', fontSize: 14, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
-            >↓</button>
+
+          {/* Generate / Download */}
+          {deal.image && !generating && (
+            hasSheet ? (
+              <>
+                <button
+                  title="Download character sheet"
+                  onClick={() => downloadImage(deal.characterSheet, `${deal.brand}-sheet.jpg`)}
+                  style={{ width: 28, height: 28, borderRadius: '50%', background: 'var(--bg-tertiary)', color: 'var(--text-secondary)', fontSize: 14, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                >↓</button>
+                <button
+                  title="Regenerate sheet"
+                  onClick={() => onGenerate(deal)}
+                  style={{ width: 28, height: 28, borderRadius: '50%', background: 'var(--bg-tertiary)', color: 'var(--text-secondary)', fontSize: 13, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                >↺</button>
+              </>
+            ) : (
+              <button
+                onClick={() => onGenerate(deal)}
+                style={{
+                  padding: '4px 10px', borderRadius: 6, fontSize: 11, fontWeight: 600,
+                  background: 'linear-gradient(135deg,#EC4899,#8B5CF6)',
+                  color: '#fff',
+                  boxShadow: '0 1px 8px rgba(139,92,246,0.3)',
+                  whiteSpace: 'nowrap',
+                }}
+              >Generate</button>
+            )
           )}
+
+          {/* Delete */}
           <button
+            disabled={generating}
             onClick={() => onDelete(deal.id)}
-            style={{ width: 28, height: 28, borderRadius: '50%', background: 'rgba(255,59,48,0.1)', color: '#FF3B30', fontSize: 16, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+            style={{ width: 28, height: 28, borderRadius: '50%', background: 'rgba(255,59,48,0.1)', color: '#FF3B30', fontSize: 16, display: 'flex', alignItems: 'center', justifyContent: 'center', opacity: generating ? 0.4 : 1 }}
           >×</button>
         </div>
       </div>
+
+      <style>{`@keyframes spin { to { transform: rotate(360deg) } }`}</style>
     </div>
   )
 }
@@ -201,6 +274,8 @@ export default function BrandDeals() {
   const [deals, setDeals] = useBrandDeals()
   const [showNew, setShowNew] = useState(false)
   const [lightboxDeal, setLightboxDeal] = useState(null)
+  const [generating, setGenerating] = useState({})   // { [id]: bool }
+  const [genProgress, setGenProgress] = useState({}) // { [id]: 0–100 }
 
   function addDeal({ brand, category, image }) {
     setDeals(prev => [...prev, { id: generateId(), brand, category, image, createdAt: Date.now() }])
@@ -208,6 +283,7 @@ export default function BrandDeals() {
   }
 
   function deleteDeal(id) {
+    if (generating[id]) return
     const deal = deals.find(d => d.id === id)
     if (!deal) return
     if (!window.confirm(`Delete "${deal.brand}"?`)) return
@@ -218,13 +294,61 @@ export default function BrandDeals() {
     setDeals(prev => prev.map(d => d.id === id ? { ...d, brand } : d))
   }
 
+  async function handleGenerate(deal) {
+    if (!isHFConnected()) { alert('Connect Higgsfield in Settings first'); return }
+
+    setGenerating(g => ({ ...g, [deal.id]: true }))
+    setGenProgress(p => ({ ...p, [deal.id]: 0 }))
+
+    try {
+      // Step 1 — Claude studies the image and writes the full Higgsfield prompt
+      let imagePrompt = null
+      const claudeKey = localStorage.getItem('claude_api_key')
+      console.log('[BrandDeals] claudeKey found:', !!claudeKey, '| deal.image exists:', !!deal.image)
+      if (claudeKey && deal.image) {
+        try {
+          setGenProgress(p => ({ ...p, [deal.id]: 5 }))
+          console.log('[BrandDeals] Calling Claude...')
+          imagePrompt = await buildCharSheetPromptWithClaude(deal.image, deal.brand, deal.category, claudeKey)
+          console.log('[BrandDeals] Claude returned prompt:', imagePrompt?.slice(0, 120))
+        } catch (e) {
+          console.error('[BrandDeals] Claude failed:', e.message)
+        }
+      }
+
+      // Step 2 — fall back to template if Claude wasn't available or failed
+      if (!imagePrompt) {
+        console.log('[BrandDeals] Using text fallback prompt')
+        imagePrompt = buildCharSheetPrompt(deal.brand, deal.category)
+      }
+
+      // Step 3 — Higgsfield GPT Image 2 generates the character sheet
+      setGenProgress(p => ({ ...p, [deal.id]: 15 }))
+      const sheetUrl = await generateSingleImage({
+        prompt: imagePrompt,
+        aspectRatio: '16:9',
+        referenceImage: deal.image,
+        onProgress: pct => setGenProgress(prev => ({ ...prev, [deal.id]: pct })),
+      })
+
+      if (sheetUrl) {
+        setDeals(prev => prev.map(d => d.id === deal.id ? { ...d, characterSheet: sheetUrl } : d))
+      }
+    } catch (e) {
+      if (!e.message?.includes('CANCELLED')) alert('Generation failed: ' + e.message)
+    } finally {
+      setGenerating(g => ({ ...g, [deal.id]: false }))
+      setGenProgress(p => ({ ...p, [deal.id]: 0 }))
+    }
+  }
+
   return (
     <div style={{ paddingTop: 'var(--nav-h)', minHeight: '100vh', background: 'var(--bg)' }}>
       {showNew && <NewDealModal onClose={() => setShowNew(false)} onSave={addDeal} />}
 
       {lightboxDeal && (
         <Lightbox
-          images={[lightboxDeal.image]}
+          images={[lightboxDeal.characterSheet || lightboxDeal.image]}
           startIndex={0}
           onClose={() => setLightboxDeal(null)}
         />
@@ -256,14 +380,17 @@ export default function BrandDeals() {
             <p style={{ fontSize: 13 }}>Add brands you want to promote with your influencers</p>
           </div>
         ) : (
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: 16 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))', gap: 16 }}>
             {deals.map(deal => (
               <DealCard
                 key={deal.id}
                 deal={deal}
+                generating={!!generating[deal.id]}
+                progress={genProgress[deal.id] || 0}
                 onDelete={deleteDeal}
                 onRename={renameDeal}
                 onOpen={() => setLightboxDeal(deal)}
+                onGenerate={handleGenerate}
               />
             ))}
           </div>

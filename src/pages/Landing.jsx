@@ -37,7 +37,14 @@ function useTypewriter() {
 }
 
 // All available images — add more paths here as you collect them
-const ALL_IMGS = ['/inf/i1.png', '/inf/i2.png', '/inf/i3.jpg', '/inf/i4.jpg', '/inf/i5.png', '/inf/i6.jpg']
+const ALL_IMGS = [
+  '/inf/i1.png',  '/inf/i2.png',  '/inf/i3.jpg',  '/inf/i4.jpg',  '/inf/i5.png',
+  '/inf/i6.jpg',  '/inf/i7.png',  '/inf/i8.png',  '/inf/i9.png',  '/inf/i10.png',
+  '/inf/i11.png', '/inf/i12.png', '/inf/i13.png', '/inf/i14.png', '/inf/i15.png',
+  '/inf/i16.png', '/inf/i17.png', '/inf/i18.png', '/inf/i19.png', '/inf/i20.png',
+  '/inf/i21.png', '/inf/i22.png', '/inf/i23.png', '/inf/i24.png', '/inf/i25.png',
+  '/inf/i26.png', '/inf/i27.png', '/inf/i28.png', '/inf/i29.png',
+]
 
 // 6 card slots — position, rotation, size, float timing
 const CARDS = [

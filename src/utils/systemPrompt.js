@@ -37,9 +37,9 @@ function getTimesForNiche() {
 // Higgsfield Soul struggles with detailed spatial pose instructions,
 // so these strip body-angle / weight / hand geometry down to a natural feel cue.
 const POSES_SOUL = {
-  facing: _prop => 'standing naturally and facing the camera, weight relaxed, arms at ease — a real person comfortable being photographed, not posing',
-  angled: _prop => 'standing at a slight natural angle toward the camera, relaxed posture, not stiff — just present and at ease',
-  candid: _prop => 'caught in a natural candid moment, looking directly toward the camera with open, relaxed energy — genuine, unguarded',
+  facing: _prop => 'standing upright facing the camera, body straight and balanced, shoulders level, arms relaxed at the sides — calm and simple, not leaning, not posed',
+  angled: _prop => 'standing upright with the body turned slightly toward the camera, balanced and straight, shoulders relaxed — simple and still, not leaning forward, not posed',
+  candid: _prop => 'standing upright and looking toward the camera with a calm, natural expression, body balanced and still — simple presence, not leaning, not mid-motion, not posed',
 }
 
 // ── Pose — driven by personality slider ──────────────────────

@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { useLocation } from 'react-router-dom'
-import { startHiggsfieldOAuthPopup, disconnectHF, isHFConnected, fireReferralOnce } from '../utils/higgsfieldAuth'
+import { startHiggsfieldOAuthPopup, disconnectHF, isHFConnected } from '../utils/higgsfieldAuth'
 import { useTheme } from '../context/theme'
 
 function Section({ title, children }) {
@@ -14,27 +14,22 @@ function Section({ title, children }) {
   )
 }
 
+const CLAUDE_KEY = 'claude_api_key'
+
 export default function Settings() {
   const location = useLocation()
   const { theme, toggle } = useTheme()
-  const [anthropicKey, setAnthropicKey] = useState(() => localStorage.getItem('anthropic_key') || '')
-  const [showKey, setShowKey] = useState(false)
-  const [saved, setSaved] = useState(false)
   const [hfConnected, setHfConnected] = useState(isHFConnected)
   const [hfLoading, setHfLoading] = useState(false)
-
+  const [claudeKey, setClaudeKey] = useState(() => localStorage.getItem(CLAUDE_KEY) || '')
+  const [claudeInput, setClaudeInput] = useState('')
+  const [showClaudeInput, setShowClaudeInput] = useState(false)
   useEffect(() => {
     const params = new URLSearchParams(location.search)
     if (params.get('connected') === '1') {
       setHfConnected(true)
     }
   }, [location.search])
-
-  function saveAnthropicKey() {
-    localStorage.setItem('anthropic_key', anthropicKey.trim())
-    setSaved(true)
-    setTimeout(() => setSaved(false), 2000)
-  }
 
   async function connectHiggsfield() {
     setHfLoading(true)
@@ -94,40 +89,6 @@ export default function Settings() {
           </div>
         </Section>
 
-        <Section title="Claude AI">
-          <p style={{ fontSize: 13, color: 'var(--text-secondary)', marginBottom: 16, lineHeight: 1.6 }}>
-            Claude generates optimized Higgsfield prompts from your influencer profile. Get your API key from{' '}
-            <a href="https://console.anthropic.com" target="_blank" rel="noreferrer" style={{ color: 'var(--accent)' }}>console.anthropic.com</a>.
-          </p>
-          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-            <div style={{ flex: 1, position: 'relative' }}>
-              <input
-                type={showKey ? 'text' : 'password'}
-                value={anthropicKey}
-                onChange={e => setAnthropicKey(e.target.value)}
-                placeholder="sk-ant-..."
-                style={{ width: '100%', padding: '10px 40px 10px 14px', borderRadius: 8, border: '1.5px solid var(--border)', background: 'var(--bg)', fontSize: 14, color: 'var(--text-primary)' }}
-              />
-              <button onClick={() => setShowKey(v => !v)} style={{ position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)', fontSize: 11, color: 'var(--text-tertiary)', background: 'none', padding: '2px 4px' }}>
-                {showKey ? 'Hide' : 'Show'}
-              </button>
-            </div>
-            <button
-              onClick={saveAnthropicKey}
-              disabled={!anthropicKey.trim()}
-              style={{ padding: '10px 18px', borderRadius: 8, fontSize: 14, fontWeight: 600, background: saved ? '#34C759' : 'var(--text-primary)', color: '#fff', transition: 'background 0.2s', whiteSpace: 'nowrap' }}
-            >
-              {saved ? '✓ Saved' : 'Save Key'}
-            </button>
-          </div>
-          {anthropicKey && (
-            <div style={{ marginTop: 10, display: 'flex', alignItems: 'center', gap: 6 }}>
-              <div style={{ width: 7, height: 7, borderRadius: '50%', background: '#34C759' }} />
-              <span style={{ fontSize: 12, color: '#34C759', fontWeight: 500 }}>Claude connected</span>
-            </div>
-          )}
-        </Section>
-
         <Section title="Higgsfield">
           <p style={{ fontSize: 13, color: 'var(--text-secondary)', marginBottom: 16, lineHeight: 1.6 }}>
             Connect your Higgsfield account to generate influencer images directly in the app. Images use your own Higgsfield credits.
@@ -157,6 +118,69 @@ export default function Settings() {
                 'Connect Higgsfield'
               )}
               <style>{`@keyframes spin { to { transform: rotate(360deg) } }`}</style>
+            </button>
+          )}
+        </Section>
+
+        <Section title="Claude AI">
+          <p style={{ fontSize: 13, color: 'var(--text-secondary)', marginBottom: 16, lineHeight: 1.6 }}>
+            Add your Anthropic API key to let Claude analyze the image just before generating your product character sheet.
+          </p>
+          {claudeKey ? (
+            <div>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <div style={{ width: 7, height: 7, borderRadius: '50%', background: '#34C759' }} />
+                  <span style={{ fontSize: 13, fontWeight: 600, color: '#34C759' }}>Claude connected</span>
+                  <span style={{ fontSize: 12, color: 'var(--text-secondary)' }}>···{claudeKey.slice(-4)}</span>
+                </div>
+                <button
+                  onClick={() => { localStorage.removeItem(CLAUDE_KEY); setClaudeKey(''); setClaudeInput(''); setShowClaudeInput(false) }}
+                  style={{ padding: '7px 14px', borderRadius: 8, fontSize: 13, color: '#FF3B30', background: 'rgba(255,59,48,0.08)', border: '1px solid rgba(255,59,48,0.18)', fontWeight: 500 }}
+                >
+                  Remove
+                </button>
+              </div>
+            </div>
+          ) : showClaudeInput ? (
+            <div style={{ display: 'flex', gap: 8 }}>
+              <input
+                autoFocus
+                type="password"
+                value={claudeInput}
+                onChange={e => setClaudeInput(e.target.value)}
+                placeholder="sk-ant-..."
+                onKeyDown={e => {
+                  if (e.key === 'Enter' && claudeInput.trim()) {
+                    const k = claudeInput.trim()
+                    localStorage.setItem(CLAUDE_KEY, k)
+                    setClaudeKey(k)
+                    setClaudeInput('')
+                    setShowClaudeInput(false)
+                  }
+                }}
+                style={{ flex: 1, padding: '10px 14px', borderRadius: 8, border: '1.5px solid var(--border)', background: 'var(--bg)', fontSize: 14, color: 'var(--text-primary)', fontFamily: 'monospace' }}
+              />
+              <button
+                onClick={() => {
+                  const k = claudeInput.trim()
+                  if (!k) return
+                  localStorage.setItem(CLAUDE_KEY, k)
+                  setClaudeKey(k)
+                  setClaudeInput('')
+                  setShowClaudeInput(false)
+                }}
+                style={{ padding: '10px 18px', borderRadius: 8, fontSize: 14, fontWeight: 600, background: '#1D1D1F', color: '#fff', border: 'none', cursor: 'pointer' }}
+              >
+                Save
+              </button>
+            </div>
+          ) : (
+            <button
+              onClick={() => setShowClaudeInput(true)}
+              style={{ padding: '10px 20px', borderRadius: 8, fontSize: 14, fontWeight: 600, background: '#1D1D1F', color: '#fff', border: 'none', cursor: 'pointer' }}
+            >
+              Add API Key
             </button>
           )}
         </Section>

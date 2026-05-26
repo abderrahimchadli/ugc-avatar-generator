@@ -4,7 +4,7 @@ import { useNavigate, useLocation } from 'react-router-dom'
 import { useInfluencers, generateId } from '../store'
 import { buildThreeVariationPrompts } from '../utils/systemPrompt'
 import { generateThreeImages } from '../utils/higgsfieldGenerate'
-import { isHFConnected, startHiggsfieldOAuthPopup, fireReferralOnce } from '../utils/higgsfieldAuth'
+import { isHFConnected, startHiggsfieldOAuthPopup } from '../utils/higgsfieldAuth'
 import { compressImage } from '../utils/imageUtils'
 import { gColor } from '../utils/influencerUtils'
 
@@ -54,7 +54,8 @@ const HAIR_COLORS = [
   { id: 'silver',   label: 'Silver',    swatch: '#A8A8A8' },
   { id: 'dyed',     label: 'Dyed',      swatch: 'linear-gradient(135deg,#EC4899,#8B5CF6)' },
 ]
-const HAIR_LENGTHS  = ['Short', 'Medium', 'Long', 'Extra long']
+const HAIR_LENGTHS_FEMALE = ['Short', 'Medium', 'Long', 'Extra long']
+const HAIR_LENGTHS_MALE   = ['Buzz cut', 'Short', 'Medium', 'Long']
 const HAIR_TEXTURES = ['Straight', 'Wavy', 'Curly', 'Coily']
 const EYE_COLORS = [
   { id: 'blue',       label: 'Blue',       swatch: '#4A90D9' },
@@ -64,7 +65,8 @@ const EYE_COLORS = [
   { id: 'dark',       label: 'Dark',       swatch: '#1A1008' },
   { id: 'light grey', label: 'Grey',       swatch: '#8A9BAA' },
 ]
-const BUILDS = ['Petite', 'Slim', 'Athletic', 'Average', 'Curvy', 'Tall', 'Plus']
+const BUILDS_FEMALE = ['Petite', 'Slim', 'Athletic', 'Average', 'Curvy', 'Tall', 'Plus']
+const BUILDS_MALE   = ['Slim', 'Athletic', 'Average', 'Muscular', 'Stocky', 'Tall']
 const ETHNICITIES = ['White', 'Black', 'Hispanic', 'East Asian', 'South Asian', 'Middle Eastern', 'Southeast Asian', 'Mixed']
 
 function buildPhysicalDescString(d) {
@@ -226,11 +228,10 @@ function Step1({ data, set, onGenderChange, ageErrorPulse }) {
 
       <div style={{ marginBottom: 22 }}>
         <Lbl>Gender</Lbl>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 10 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2,1fr)', gap: 10 }}>
           {[
-            { g: 'Female',     color: '#EC4899', glow: 'rgba(236,72,153,0.10)', icon: '♀' },
-            { g: 'Male',       color: '#3B82F6', glow: 'rgba(59,130,246,0.10)',  icon: '♂' },
-            { g: 'Non-binary', color: '#8B5CF6', glow: 'rgba(139,92,246,0.10)', icon: '⚧' },
+            { g: 'Female', color: '#EC4899', glow: 'rgba(236,72,153,0.10)', icon: '♀' },
+            { g: 'Male',   color: '#3B82F6', glow: 'rgba(59,130,246,0.10)', icon: '♂' },
           ].map(({ g, color, glow, icon }) => {
             const on = data.gender === g
             return (
@@ -473,7 +474,10 @@ function Step3({ data, set }) {
 }
 
 // ── Physical description builder ─────────────────────────────
-function PhysicalBuilder({ data, set }) {
+function PhysicalBuilder({ data, set, gender }) {
+  const isMale = (gender || '').toLowerCase() === 'male'
+  const hairLengths = isMale ? HAIR_LENGTHS_MALE : HAIR_LENGTHS_FEMALE
+  const builds = isMale ? BUILDS_MALE : BUILDS_FEMALE
   const sec = { paddingBottom: 20, marginBottom: 20, borderBottom: `1px solid ${L.border}` }
   const lbl = { fontSize: 11, fontWeight: 700, color: L.textFaint, textTransform: 'uppercase', letterSpacing: '0.6px', marginBottom: 11 }
   const chips = { display: 'flex', flexWrap: 'wrap', gap: 7 }
@@ -537,10 +541,10 @@ function PhysicalBuilder({ data, set }) {
     set('ethnicity',  pick(ETHNICITIES))
     set('skinTone',   pick(SKIN_TONES).id)
     set('hairColor',  pick(HAIR_COLORS).id)
-    set('hairLength', pick(HAIR_LENGTHS))
+    set('hairLength', pick(hairLengths))
     set('hairTexture',pick(HAIR_TEXTURES))
     set('eyeColor',   pick(EYE_COLORS).id)
-    set('build',      pick(BUILDS))
+    set('build',      pick(builds))
   }
 
   return (
@@ -587,7 +591,7 @@ function PhysicalBuilder({ data, set }) {
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20 }}>
           <div>
             <div style={{ fontSize: 10.5, fontWeight: 600, color: L.textFaint, marginBottom: 9, letterSpacing: '0.2px' }}>Length</div>
-            <SegmentPicker options={HAIR_LENGTHS} field="hairLength" />
+            <SegmentPicker options={hairLengths} field="hairLength" />
           </div>
           <div>
             <div style={{ fontSize: 10.5, fontWeight: 600, color: L.textFaint, marginBottom: 9, letterSpacing: '0.2px' }}>Texture</div>
@@ -608,7 +612,7 @@ function PhysicalBuilder({ data, set }) {
       <div style={sec}>
         <div style={lbl}>💪 Build</div>
         <div style={chips}>
-          {BUILDS.map(b => <Pill key={b} label={b} field="build" />)}
+          {builds.map(b => <Pill key={b} label={b} field="build" />)}
         </div>
       </div>
 
@@ -635,7 +639,7 @@ function Step4({ data, set }) {
   const gender = (data.gender || '').toLowerCase()
   const visibleVibes = VIBE_OPTIONS.filter(v => {
     if (!v.genders) return true
-    if (!gender || gender === 'non-binary') return true
+    if (!gender) return true
     return v.genders.includes(gender)
   })
 
@@ -646,7 +650,7 @@ function Step4({ data, set }) {
         <p style={{ fontSize: 15, color: L.textSub, lineHeight: 1.55 }}>Physical features and aesthetic — this shapes the AI generation.</p>
       </div>
 
-      <PhysicalBuilder data={data} set={set} />
+      <PhysicalBuilder data={data} set={set} gender={gender} />
 
       <div style={{ background: L.surface, borderRadius: 18, padding: '22px', boxShadow: L.card }}>
         <Lbl optional>Aesthetic vibe</Lbl>
@@ -1228,6 +1232,7 @@ function Step5({ data, onFinish, onReset, hfConnected, onConnected }) {
   const [selected, setSelected] = useState(null)
   const [lightboxUrl, setLightboxUrl] = useState(null)
   const [connectingHF, setConnectingHF] = useState(false)
+  const [generatedPrompts, setGeneratedPrompts] = useState([])
   const [aspectRatio, setAspectRatio] = useState('9:16')
   const [model, setModel] = useState(() => {
     const saved = localStorage.getItem(MODEL_PREF_KEY)
@@ -1248,10 +1253,16 @@ function Step5({ data, onFinish, onReset, hfConnected, onConnected }) {
   async function generate() {
     setPhase('generating'); setGenError(null); setVariations([]); setSelected(null); setGenProgress(5); setLightboxUrl(null)
     try {
-      console.log('[Generate] model:', model, '| ratio:', aspectRatio)
       const physicalDesc = buildPhysicalDescString(data)
       const prompts = buildThreeVariationPrompts({ ...data, physicalDesc }, aspectRatio, model)
-      const urls = await generateThreeImages({ prompts, aspectRatio, model, faceRef: data.faceRef || null, styleRef: data.styleRef || null, physicalDesc, faceRefNote: data.faceRefNote || '', styleRefNote: data.styleRefNote || '', onProgress: setGenProgress })
+      setGeneratedPrompts(prompts)
+      const urls = await generateThreeImages({
+        prompts, aspectRatio, model,
+        faceRef: data.faceRef || null, styleRef: data.styleRef || null,
+        physicalDesc, faceRefNote: data.faceRefNote || '', styleRefNote: data.styleRefNote || '',
+        onProgress: setGenProgress,
+        onPartialResults: partial => setVariations(partial.slice(0, 3)),
+      })
       setVariations(urls.slice(0, 3))
       setPhase('done')
     } catch (e) {
@@ -1377,7 +1388,35 @@ function Step5({ data, onFinish, onReset, hfConnected, onConnected }) {
         </div>
       )}
 
-      {phase === 'generating' && <GeneratingScreen genProgress={genProgress} model={model} aspectRatio={aspectRatio} landscape={aspectRatio === '16:9'} hasRef={!!(data.faceRef || data.styleRef)} />}
+      {phase === 'generating' && variations.length === 0 && (
+        <GeneratingScreen genProgress={genProgress} model={model} aspectRatio={aspectRatio} landscape={aspectRatio === '16:9'} hasRef={!!(data.faceRef || data.styleRef)} />
+      )}
+
+      {phase === 'generating' && variations.length > 0 && (() => {
+        const isLandscape = aspectRatio === '16:9'
+        const total = 3
+        return (
+          <div>
+            <div style={{ fontSize: 13, color: L.textFaint, marginBottom: 16, display: 'flex', alignItems: 'center', gap: 8 }}>
+              <div style={{ width: 8, height: 8, borderRadius: '50%', background: 'linear-gradient(135deg,#EC4899,#8B5CF6)', animation: 'genSpin 1.2s linear infinite' }} />
+              <style>{`@keyframes genSpin{to{transform:rotate(360deg)}}`}</style>
+              {variations.length} of {total} ready…
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: isLandscape ? '1fr' : `repeat(${total},1fr)`, gap: 16, marginBottom: 20 }}>
+              {Array.from({ length: total }, (_, i) => {
+                const url = variations[i]
+                return url ? (
+                  <VariationCard key={i} url={url} selected={false} gc={gc} onSelect={() => {}} index={i} landscape={isLandscape} onExpand={u => setLightboxUrl(u)} />
+                ) : (
+                  <div key={i} style={{ borderRadius: 14, overflow: 'hidden', background: 'var(--bg-tertiary)', aspectRatio: isLandscape ? '16/9' : '9/16', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                    <div style={{ width: 22, height: 22, borderRadius: '50%', border: '2.5px solid rgba(139,92,246,0.3)', borderTopColor: '#8B5CF6', animation: 'genSpin 0.8s linear infinite' }} />
+                  </div>
+                )
+              })}
+            </div>
+          </div>
+        )
+      })()}
 
       {phase === 'error' && (
         <div>
@@ -1420,7 +1459,7 @@ function Step5({ data, onFinish, onReset, hfConnected, onConnected }) {
 
           {/* Primary CTA — always visible, morphs on selection */}
           <button
-            onClick={selected !== null ? () => onFinish(variations, selected, model, aspectRatio) : undefined}
+            onClick={selected !== null ? () => onFinish(variations, selected, model, aspectRatio, generatedPrompts[selected] || '') : undefined}
             style={{
               width: '100%', padding: '17px', borderRadius: 14, fontSize: 15, fontWeight: 700,
               border: 'none', cursor: selected !== null ? 'pointer' : 'default',
@@ -1540,7 +1579,7 @@ export default function Create() {
     setData({ name: '', gender: '', age: '', niches: [], nicheCustom: '', backstory: '', personality: 50, ethnicity: '', skinTone: '', hairColor: '', hairLength: 'Long', hairTexture: 'Straight', eyeColor: '', build: '', uniqueFeatures: '', vibeWords: [], faceRef: null, styleRef: null, faceRefNote: '', styleRefNote: '' })
   }
 
-  function finish(variations, selectedIdx, genModel, genAspectRatio) {
+  function finish(variations, selectedIdx, genModel, genAspectRatio, genPrompt = '') {
     const niches = (data.niches || []).filter(n => n !== 'Other')
 
     const otherVariations = variations.filter((_, i) => i !== selectedIdx)
@@ -1554,6 +1593,7 @@ export default function Create() {
       backstory: data.backstory, introExtrovert: data.personality,
       physicalDesc: buildPhysicalDescString(data), vibeWords: data.vibeWords,
       mainImage: variations[selectedIdx] || null,
+      prompt: genPrompt,
       characterSheetImage: null,
       closeUpImage1: null,
       closeUpImage2: null,
