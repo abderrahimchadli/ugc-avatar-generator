@@ -462,13 +462,8 @@ export function StoreProvider({ children }) {
           try { localStorage.setItem('photo_studio_history', JSON.stringify(merged)) } catch {}
         }
 
-        // Update React state with all influencers (existing + newly added seeds)
-        const finalIds = readIds() || []
-        const loaded = finalIds.map(id => {
-          const existing = readInfluencer(id)
-          return existing || seeds.influencers[id] || null
-        }).filter(Boolean)
-        influencerStore[1](loaded)
+        // Reload so all components initialize from the freshly seeded localStorage
+        window.location.reload()
       })
       .catch(e => console.warn('[seeds] failed to load:', e))
   }, []) // eslint-disable-line
