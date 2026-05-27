@@ -430,8 +430,10 @@ const TEMPLATE_IDS = new Set(['kayla-template', 'camila-template', 'marcus-templ
 
 export function StoreProvider({ children }) {
   const influencerStore = useInfluencerStore([KAYLA_SEED, CAMILA_SEED, MARCUS_SEED])
-  const inspiration = useLocalStorage('inspiration_boards', [])
-  const brandDeals  = useLocalStorage('brand_deals', [])
+  const inspirationState = useLocalStorage('inspiration_boards', [])
+  const brandDealsState  = useLocalStorage('brand_deals', [])
+  const [, setInspirationBoards] = inspirationState
+  const [, setDealsData]         = brandDealsState
 
   // Seed from /seeds.json when seed IDs are missing from localStorage
   useEffect(() => {
@@ -482,16 +484,19 @@ export function StoreProvider({ children }) {
           }
         }
 
-        // Always merge inspiration boards — add seed boards that aren't already there
+        // Always merge inspiration boards via React state setter — no reload needed
         const existingBoards = JSON.parse(localStorage.getItem('inspiration_boards') || '[]')
         const existingBoardIds = new Set(existingBoards.map(b => b.id))
         const newBoards = (seeds.inspiration_boards || []).filter(b => b.id && !existingBoardIds.has(b.id))
         if (newBoards.length) {
-          try { localStorage.setItem('inspiration_boards', JSON.stringify([...newBoards, ...existingBoards])) } catch {}
-          didWrite = true
+          setInspirationBoards(prev => {
+            const prevIds = new Set(prev.map(b => b.id))
+            const toAdd = newBoards.filter(b => !prevIds.has(b.id))
+            return toAdd.length ? [...toAdd, ...prev] : prev
+          })
         }
 
-        // Always merge global brand deals — add missing ones, patch existing ones whose images changed
+        // Always merge global brand deals via React state setter — no reload needed
         const existingDeals = JSON.parse(localStorage.getItem('brand_deals') || '[]')
         const existingDealMap = new Map(existingDeals.map(d => [d.id, d]))
         const newDeals = (seeds.brand_deals || []).filter(d => d.id && !existingDealMap.has(d.id))
@@ -504,11 +509,10 @@ export function StoreProvider({ children }) {
         })
         const dealsChanged = newDeals.length || patchedDeals.some((d, i) => d !== existingDeals[i])
         if (dealsChanged) {
-          try { localStorage.setItem('brand_deals', JSON.stringify([...newDeals, ...patchedDeals])) } catch {}
-          didWrite = true
+          setDealsData([...newDeals, ...patchedDeals])
         }
 
-        // Reload so all components initialize from the freshly seeded localStorage
+        // Only reload when influencer data or photo history changed — boards/deals are handled above via state
         if (didWrite) window.location.reload()
       })
       .catch(e => console.warn('[seeds] failed to load:', e))
@@ -516,8 +520,8 @@ export function StoreProvider({ children }) {
 
   return (
     <InfluencersCtx.Provider value={influencerStore}>
-      <InspirationCtx.Provider value={inspiration}>
-        <BrandDealsCtx.Provider value={brandDeals}>
+      <InspirationCtx.Provider value={inspirationState}>
+        <BrandDealsCtx.Provider value={brandDealsState}>
           {children}
         </BrandDealsCtx.Provider>
       </InspirationCtx.Provider>

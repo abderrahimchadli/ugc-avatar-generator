@@ -41,7 +41,8 @@ Wardrobe & details: [every garment with material, color, fit, condition — spec
 
 Lighting: [primary key source with Kelvin temperature and clock direction; secondary/rim source; ambient source; whether single-source or mixed-color-temperature. The subject's face is the brightest element in the frame.]
 
-Camera & capture: [device/lens/aperture matching the vibe (iPhone for plandid, mirrorless for editorial); aspect ratio; framing tightness; focal point placement.]
+
+its not thCamera & capture: [device/lens/aperture matching the vibe (iPhone for plandid, mirrorless for editorial); aspect ratio; framing tightness; focal point placement.]
 
 Skin (rendered as concrete photographic facts, not category words):
 — [Visible pores with location and micro-shadow direction relative to the key light]
