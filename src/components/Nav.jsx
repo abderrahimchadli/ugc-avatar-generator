@@ -32,7 +32,7 @@ export default function Nav() {
           {isDark ? '☾' : '☼'}
         </button>
         <NavLink to="/settings" className={({ isActive }) => isActive ? 'nav-link active' : 'nav-link'}>Settings</NavLink>
-        {profile ? <button className="text-btn" onClick={signOut}>Sign out</button> : <NavLink className="primary-btn compact" to="/login">Sign in</NavLink>}
+        {profile ? <button className="text-btn" onClick={signOut}>Sign out {profile.displayName || ''}</button> : <NavLink className="primary-btn compact" to="/login">Sign in</NavLink>}
       </div>
     </nav>
   )

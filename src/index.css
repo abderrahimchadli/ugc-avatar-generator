@@ -407,6 +407,12 @@ a {
   gap: 14px;
 }
 
+.account-picks {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
 .inline-form {
   grid-template-columns: minmax(0, 1fr) auto;
   margin-bottom: 18px;
@@ -608,5 +614,6 @@ textarea {
   }
   .hero-panel { padding: 28px; }
   .inline-form { grid-template-columns: 1fr; }
+  .account-picks { grid-template-columns: 1fr; }
   .nav-links { display: none; }
 }

@@ -1,10 +1,14 @@
-import { createContext, useContext, useMemo, useState } from 'react'
+import { createContext, useContext, useEffect, useMemo, useState } from 'react'
 import { hasSupabaseConfig, supabase } from '../lib/supabaseClient'
 import { useAuth } from './auth'
+import {
+  PACKAGE_STORAGE_KEY,
+  SESSION_STORAGE_KEY,
+  accountStorageKey,
+  migrateLegacyPackages,
+} from '../utils/accountStorage'
 
 const StoreCtx = createContext(null)
-const PKG_KEY = 'ugc_packages_v1'
-const SESSION_KEY = 'ugc_generation_sessions_v1'
 
 function uid(prefix) {
   return `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
@@ -20,23 +24,43 @@ function writeJson(key, value) {
 
 export function PackageProvider({ children }) {
   const { profile } = useAuth()
-  const [packages, setPackagesState] = useState(() => readJson(PKG_KEY, []))
-  const [sessions, setSessionsState] = useState(() => readJson(SESSION_KEY, []))
+  const [packages, setPackagesState] = useState([])
+  const [sessions, setSessionsState] = useState([])
+  const packageKey = accountStorageKey(PACKAGE_STORAGE_KEY, profile)
+  const sessionKey = accountStorageKey(SESSION_STORAGE_KEY, profile)
+
+  useEffect(() => {
+    if (!profile) {
+      setPackagesState([])
+      setSessionsState([])
+      return
+    }
+
+    const scopedPackages = readJson(packageKey, null)
+    if (Array.isArray(scopedPackages)) {
+      setPackagesState(scopedPackages)
+    } else {
+      const migrated = migrateLegacyPackages(readJson(PACKAGE_STORAGE_KEY, []), profile)
+      setPackagesState(migrated)
+      writeJson(packageKey, migrated)
+    }
+    setSessionsState(readJson(sessionKey, []))
+  }, [profile?.id, packageKey, sessionKey])
 
   function setPackages(next) {
     setPackagesState(next)
-    writeJson(PKG_KEY, next)
+    writeJson(packageKey, next)
   }
 
   function setSessions(next) {
     setSessionsState(next)
-    writeJson(SESSION_KEY, next)
+    writeJson(sessionKey, next)
   }
 
   function createPackage(type, name, notes = '') {
     const pack = {
       id: uid(type === 'avatar' ? 'av' : 'prd'),
-      ownerId: profile?.id || 'demo-super-user',
+      ownerId: profile?.id || 'signed-out',
       type,
       name: name.trim(),
       notes,
@@ -92,7 +116,7 @@ export function PackageProvider({ children }) {
       packageId,
       packageName: pack?.name || '',
       packageType: pack?.type || 'avatar',
-      ownerId: pack?.ownerId || profile?.id || 'demo-super-user',
+      ownerId: pack?.ownerId || profile?.id || 'signed-out',
       mode,
       prompt,
       promptHash: hashText(prompt),

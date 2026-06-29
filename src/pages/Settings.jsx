@@ -35,7 +35,7 @@ export default function Settings() {
         <p className="eyebrow">Settings</p>
         <h1>Connections and storage</h1>
         <div className="settings-row">
-          <div><strong>User</strong><span>{profile?.email || 'Not signed in'} · {isApproved ? 'approved' : 'pending'} {isSuperUser ? '· super user' : ''}</span></div>
+          <div><strong>Active account</strong><span>{profile?.displayName || profile?.email || 'Not signed in'} · {profile?.email || 'no email'} · {isApproved ? 'approved' : 'pending'} {isSuperUser ? '· super user' : ''}</span></div>
         </div>
         <div className="settings-row">
           <div><strong>Supabase</strong><span>{hasSupabaseConfig ? 'Configured for real auth and metadata' : 'Demo mode: local-only auth and packages'}</span></div>

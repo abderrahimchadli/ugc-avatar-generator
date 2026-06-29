@@ -1,26 +1,22 @@
 import { createContext, useContext, useEffect, useMemo, useState } from 'react'
 import { hasSupabaseConfig, supabase } from '../lib/supabaseClient'
+import {
+  DEMO_PROFILE_KEY,
+  createDemoAccount,
+  readActiveDemoProfile,
+  readDemoAccounts,
+  saveDemoAccounts,
+  signInDemoAccount,
+  toProfile,
+  updateDemoAccountStatus,
+} from '../utils/demoAccounts'
 
 const AuthCtx = createContext(null)
-const DEMO_KEY = 'ugc_demo_profile'
-
-function demoProfile() {
-  try {
-    const saved = JSON.parse(localStorage.getItem(DEMO_KEY) || 'null')
-    if (saved) return saved
-  } catch {}
-  return {
-    id: 'demo-super-user',
-    email: 'owner@example.com',
-    role: 'super_user',
-    status: 'approved',
-    demo: true,
-  }
-}
 
 export function AuthProvider({ children }) {
+  const [demoAccounts, setDemoAccounts] = useState(() => hasSupabaseConfig ? [] : readDemoAccounts())
   const [session, setSession] = useState(null)
-  const [profile, setProfile] = useState(() => hasSupabaseConfig ? null : demoProfile())
+  const [profile, setProfile] = useState(() => hasSupabaseConfig ? null : readActiveDemoProfile(readDemoAccounts()))
   const [loading, setLoading] = useState(hasSupabaseConfig)
 
   useEffect(() => {
@@ -66,19 +62,23 @@ export function AuthProvider({ children }) {
 
   async function signIn(email, password) {
     if (!hasSupabaseConfig) {
-      const p = { ...demoProfile(), email: email || 'owner@example.com' }
-      localStorage.setItem(DEMO_KEY, JSON.stringify(p))
-      setProfile(p)
+      const result = signInDemoAccount({ login: email, password, accounts: demoAccounts })
+      if (result.error) return result
+      localStorage.setItem(DEMO_PROFILE_KEY, JSON.stringify(result.profile))
+      setProfile(result.profile)
       return { error: null }
     }
     return supabase.auth.signInWithPassword({ email, password })
   }
 
-  async function signUp(email, password) {
+  async function signUp(email, password, displayName = '') {
     if (!hasSupabaseConfig) {
-      const p = { id: `demo-${Date.now()}`, email, role: 'user', status: 'pending', demo: true }
-      localStorage.setItem(DEMO_KEY, JSON.stringify(p))
-      setProfile(p)
+      const result = createDemoAccount({ email, password, displayName, accounts: demoAccounts })
+      if (result.error) return result
+      saveDemoAccounts(result.accounts)
+      setDemoAccounts(result.accounts)
+      localStorage.setItem(DEMO_PROFILE_KEY, JSON.stringify(result.profile))
+      setProfile(result.profile)
       return { error: null }
     }
     return supabase.auth.signUp({ email, password })
@@ -86,11 +86,24 @@ export function AuthProvider({ children }) {
 
   async function signOut() {
     if (!hasSupabaseConfig) {
-      localStorage.removeItem(DEMO_KEY)
+      localStorage.removeItem(DEMO_PROFILE_KEY)
       setProfile(null)
       return
     }
     await supabase.auth.signOut()
+  }
+
+  function updateDemoUser(id, status) {
+    if (hasSupabaseConfig) return
+    const next = updateDemoAccountStatus(demoAccounts, id, status)
+    saveDemoAccounts(next)
+    setDemoAccounts(next)
+    if (profile?.id === id) {
+      const account = next.find(item => item.id === id)
+      const nextProfile = toProfile(account)
+      setProfile(nextProfile)
+      if (nextProfile) localStorage.setItem(DEMO_PROFILE_KEY, JSON.stringify(nextProfile))
+    }
   }
 
   const value = useMemo(() => ({
@@ -98,12 +111,14 @@ export function AuthProvider({ children }) {
     profile,
     loading,
     hasSupabaseConfig,
+    demoAccounts: demoAccounts.map(toProfile),
     isApproved: profile?.status === 'approved' || profile?.role === 'super_user',
     isSuperUser: profile?.role === 'super_user',
     signIn,
     signUp,
     signOut,
-  }), [session, profile, loading])
+    updateDemoUser,
+  }), [session, profile, loading, demoAccounts])
 
   return <AuthCtx.Provider value={value}>{children}</AuthCtx.Provider>
 }
@@ -113,4 +128,3 @@ export function useAuth() {
   if (!ctx) throw new Error('useAuth must be used inside AuthProvider')
   return ctx
 }
-

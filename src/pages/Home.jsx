@@ -23,7 +23,7 @@ export default function Home() {
           </div>
         </div>
         <div className="status-grid">
-          <div><span>User</span><strong>{profile?.email || 'Not signed in'}</strong></div>
+          <div><span>Active account</span><strong>{profile?.displayName || profile?.email || 'Not signed in'}</strong></div>
           <div><span>Status</span><strong>{isApproved ? 'Approved' : 'Pending'}</strong></div>
           <div><span>Storage</span><strong>{formatBytes(storageStats.usedBytes)}</strong></div>
           <div><span>Supabase</span><strong>{hasSupabaseConfig ? 'Configured' : 'Demo mode'}</strong></div>
@@ -32,4 +32,3 @@ export default function Home() {
     </main>
   )
 }
-

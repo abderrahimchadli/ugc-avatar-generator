@@ -2,14 +2,18 @@ import { useEffect, useState } from 'react'
 import { useAuth } from '../context/auth'
 
 export default function AdminUsers() {
-  const { session, isSuperUser, hasSupabaseConfig } = useAuth()
+  const { session, isSuperUser, hasSupabaseConfig, demoAccounts, updateDemoUser } = useAuth()
   const [users, setUsers] = useState([])
   const [message, setMessage] = useState('')
 
   useEffect(() => {
-    if (!isSuperUser || !hasSupabaseConfig) return
+    if (!isSuperUser) return
+    if (!hasSupabaseConfig) {
+      setUsers(demoAccounts)
+      return
+    }
     load()
-  }, [isSuperUser, hasSupabaseConfig])
+  }, [isSuperUser, hasSupabaseConfig, demoAccounts])
 
   async function load() {
     const token = session?.access_token
@@ -20,6 +24,11 @@ export default function AdminUsers() {
   }
 
   async function update(id, status) {
+    if (!hasSupabaseConfig) {
+      updateDemoUser(id, status)
+      setMessage(status === 'approved' ? 'Demo account approved.' : 'Demo account blocked.')
+      return
+    }
     const token = session?.access_token
     const res = await fetch('/api/admin/users', {
       method: 'POST',
@@ -41,20 +50,20 @@ export default function AdminUsers() {
           <h1>User approval</h1>
         </div>
       </div>
-      {!hasSupabaseConfig && <p className="notice">Demo mode: configure Supabase env vars to approve real users.</p>}
+      {!hasSupabaseConfig && <p className="notice">Demo mode: user approval is saved locally in this browser. Connect Supabase later for server-side accounts.</p>}
       {message && <p className="notice">{message}</p>}
       <section className="panel">
         {users.map(user => (
           <div className="user-row" key={user.id}>
-            <div><strong>{user.email}</strong><span>{user.role} · {user.status}</span></div>
+            <div><strong>{user.displayName || user.email}</strong><span>{user.email} · {user.role} · {user.status}</span></div>
             <div className="row-actions">
-              <button className="primary-btn compact" onClick={() => update(user.id, 'approved')}>Approve</button>
+              {user.status !== 'approved' && <button className="primary-btn compact" onClick={() => update(user.id, 'approved')}>Approve</button>}
               <button className="danger-btn compact" onClick={() => update(user.id, 'blocked')}>Block</button>
             </div>
           </div>
         ))}
+        {!users.length && <p className="muted">No users yet.</p>}
       </section>
     </main>
   )
 }
-
