@@ -5,6 +5,50 @@ function toTime(value, fallback = Date.now()) {
   return Number.isFinite(time) ? time : fallback
 }
 
+function packageTime(pack) {
+  const itemTime = Math.max(0, ...(pack?.items || []).map(item => item.createdAt || 0))
+  return Math.max(pack?.updatedAt || 0, itemTime)
+}
+
+function packageMetadataTime(pack) {
+  return pack?.updatedAt || pack?.createdAt || 0
+}
+
+function mergeItems(primary = [], secondary = []) {
+  const byKey = new Map()
+  for (const item of [...secondary, ...primary]) {
+    const key = item.importId || item.id
+    if (!key) continue
+    const existing = byKey.get(key)
+    if (!existing || (item.createdAt || 0) >= (existing.createdAt || 0)) byKey.set(key, item)
+  }
+  return [...byKey.values()].sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0))
+}
+
+export function mergePackageLists(serverPackages = [], localPackages = []) {
+  const byId = new Map()
+  for (const pack of localPackages || []) {
+    if (pack?.id) byId.set(pack.id, { ...pack, items: [...(pack.items || [])] })
+  }
+  for (const pack of serverPackages || []) {
+    if (!pack?.id) continue
+    const existing = byId.get(pack.id)
+    if (!existing) {
+      byId.set(pack.id, { ...pack, items: [...(pack.items || [])] })
+      continue
+    }
+    const base = packageMetadataTime(pack) >= packageMetadataTime(existing) ? pack : existing
+    byId.set(pack.id, {
+      ...existing,
+      ...pack,
+      ...base,
+      items: mergeItems(pack.items || [], existing.items || []),
+      updatedAt: Math.max(pack.updatedAt || 0, existing.updatedAt || 0),
+    })
+  }
+  return [...byId.values()].sort((a, b) => packageTime(b) - packageTime(a))
+}
+
 export function packageRowFromPackage(pack) {
   const { items: _items, ...metadata } = pack
   return {

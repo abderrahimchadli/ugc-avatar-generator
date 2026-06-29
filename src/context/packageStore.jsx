@@ -11,6 +11,7 @@ import {
   deleteServerPackage,
   deleteServerPackageItem,
   loadServerPackages,
+  mergePackageLists,
   saveServerPackage,
   saveServerPackageItem,
   saveServerPackageWithItems,
@@ -53,14 +54,34 @@ export function PackageProvider({ children }) {
       }
 
       if (hasSupabaseConfig) {
+        const cachedPackages = readJson(packageKey, [])
+        if (cachedPackages.length) setPackagesState(cachedPackages)
         setServerStatus({ mode: 'server', sync: 'loading', message: 'Loading server library...' })
         const result = await loadServerPackages(profile)
         if (cancelled) return
         if (!result.error) {
-          setPackagesState(result.packages || [])
-          writeJson(packageKey, result.packages || [])
+          const merged = mergePackageLists(result.packages || [], cachedPackages)
+          setPackagesState(merged)
+          writeJson(packageKey, merged)
           setSessionsState(readJson(sessionKey, []))
-          setServerStatus({ mode: 'server', sync: 'synced', message: 'Server library synced.' })
+          setServerStatus({
+            mode: 'server',
+            sync: 'synced',
+            message: cachedPackages.length && merged.length > (result.packages || []).length
+              ? 'Server library synced with local account cache.'
+              : 'Server library synced.',
+          })
+          const missingOnServer = merged.filter(pack => !(result.packages || []).some(serverPack => serverPack.id === pack.id))
+          if (missingOnServer.length) {
+            Promise.allSettled(missingOnServer.map(pack => saveServerPackageWithItems(pack))).then(results => {
+              if (cancelled) return
+              const failed = results.find(item => item.status === 'fulfilled' && item.value?.error)
+                || results.find(item => item.status === 'rejected')
+              if (failed) {
+                setServerStatus({ mode: 'server', sync: 'error', message: 'Some local packages could not sync to server yet. They remain saved in this account browser cache.' })
+              }
+            })
+          }
           return
         }
         const fallback = readJson(packageKey, [])

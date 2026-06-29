@@ -3,6 +3,7 @@ import assert from 'node:assert/strict'
 import {
   composePackagesFromRows,
   itemRowFromPackageItem,
+  mergePackageLists,
   packageRowFromPackage,
 } from '../src/utils/serverPackageStore.js'
 
@@ -25,4 +26,27 @@ test('composes server package and item rows into account packages', () => {
   assert.equal(packages[0].ownerId, 'user-1')
   assert.equal(packages[0].items[0].id, 'img_1')
   assert.equal(packages[0].items[0].sizeBytes, 12)
+})
+
+test('keeps local account packages when server returns an empty list after login', () => {
+  const localPackages = [
+    { id: 'av_local', ownerId: 'user-1', type: 'avatar', name: 'Local Avatar', updatedAt: 10, items: [] },
+  ]
+  const merged = mergePackageLists([], localPackages)
+  assert.equal(merged.length, 1)
+  assert.equal(merged[0].id, 'av_local')
+  assert.equal(merged[0].name, 'Local Avatar')
+})
+
+test('merges server and local copies without losing imported items', () => {
+  const serverPackages = [
+    { id: 'av_1', ownerId: 'user-1', type: 'avatar', name: 'Jack', updatedAt: 20, items: [{ id: 'server_img', createdAt: 20 }] },
+  ]
+  const localPackages = [
+    { id: 'av_1', ownerId: 'user-1', type: 'avatar', name: 'Jack old', updatedAt: 10, items: [{ id: 'local_img', createdAt: 30 }] },
+  ]
+  const merged = mergePackageLists(serverPackages, localPackages)
+  assert.equal(merged.length, 1)
+  assert.equal(merged[0].name, 'Jack')
+  assert.deepEqual(merged[0].items.map(item => item.id), ['local_img', 'server_img'])
 })
