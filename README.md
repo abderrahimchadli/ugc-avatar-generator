@@ -5,6 +5,8 @@ packages, builds strong prompts, imports images from Google Flow or ChatGPT
 Image 2 through a Chrome extension, and uploads selected packages to a connected
 Higgsfield account.
 
+Full app report: https://ugc-avatar-generator-three.vercel.app/app-report.html
+
 ## What this MVP does
 
 - Stores two package groups: `Avatars` and `Products`.

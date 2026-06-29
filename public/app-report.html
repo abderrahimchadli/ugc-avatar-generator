@@ -1,0 +1,278 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>UGC Avatar Generator App Report</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f7f7f8;
+        --panel: #ffffff;
+        --text: #18181b;
+        --muted: #5f6470;
+        --border: #dedfe4;
+        --accent: #0f766e;
+        --accent-soft: #e6f4f1;
+        --warn: #92400e;
+        --warn-soft: #fff7ed;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        background: var(--bg);
+        color: var(--text);
+        line-height: 1.6;
+      }
+      main {
+        width: min(1040px, calc(100% - 32px));
+        margin: 0 auto;
+        padding: 40px 0 56px;
+      }
+      header, section {
+        background: var(--panel);
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        padding: 24px;
+        margin-bottom: 16px;
+      }
+      header { padding: 32px; }
+      .eyebrow {
+        margin: 0 0 8px;
+        color: var(--accent);
+        font-size: 12px;
+        font-weight: 800;
+        letter-spacing: 0;
+        text-transform: uppercase;
+      }
+      h1, h2 {
+        line-height: 1.08;
+        letter-spacing: 0;
+        margin: 0 0 14px;
+      }
+      h1 { font-size: clamp(34px, 6vw, 58px); }
+      h2 { font-size: 24px; }
+      p { margin: 0 0 12px; }
+      a {
+        color: var(--accent);
+        font-weight: 700;
+      }
+      ul, ol {
+        margin: 0;
+        padding-left: 22px;
+      }
+      li { margin: 6px 0; }
+      .meta {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+        gap: 10px;
+        margin-top: 22px;
+      }
+      .meta div, .callout {
+        border-radius: 10px;
+        padding: 14px;
+        background: var(--accent-soft);
+        border: 1px solid rgba(15, 118, 110, 0.18);
+      }
+      .meta span {
+        display: block;
+        color: var(--muted);
+        font-size: 12px;
+        font-weight: 800;
+        text-transform: uppercase;
+      }
+      .meta strong {
+        display: block;
+        margin-top: 4px;
+      }
+      .warning {
+        background: var(--warn-soft);
+        border-color: rgba(146, 64, 14, 0.2);
+      }
+      .warning strong { color: var(--warn); }
+      .grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+        gap: 16px;
+      }
+      .grid section { margin: 0; }
+      code {
+        padding: 2px 5px;
+        border-radius: 5px;
+        background: #eef0f3;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <header>
+        <p class="eyebrow">App report</p>
+        <h1>UGC Avatar Generator</h1>
+        <p>
+          This report explains what the app does now, what is working, what still
+          needs to be tested, and what still needs development before the app can
+          be considered ready.
+        </p>
+        <div class="meta">
+          <div><span>Report date</span><strong>June 29, 2026</strong></div>
+          <div><span>Live app</span><strong><a href="https://ugc-avatar-generator-three.vercel.app/">Open app</a></strong></div>
+          <div><span>Repository</span><strong><a href="https://github.com/abderrahimchadli/ugc-avatar-generator">GitHub repo</a></strong></div>
+          <div><span>Inspiration</span><strong><a href="https://www.youtube.com/watch?v=jZJjop9VsxQ">YouTube video</a></strong></div>
+        </div>
+      </header>
+
+      <section>
+        <h2>Project Note</h2>
+        <p>
+          Abderrahim decided to make this app after watching this video:
+          <a href="https://www.youtube.com/watch?v=jZJjop9VsxQ">https://www.youtube.com/watch?v=jZJjop9VsxQ</a>.
+          The idea is to build something that may help AI creators organize avatar
+          and product image references, generate content through connected browser
+          accounts, and prepare assets for Higgsfield workflows.
+        </p>
+        <div class="callout warning">
+          <strong>Important:</strong> the app is still not ready as a finished
+          product. It needs more development, more live testing, and more help
+          organizing the work into clear phases.
+        </div>
+      </section>
+
+      <section>
+        <h2>What The App Does Now</h2>
+        <ul>
+          <li>Creates two package groups: avatars and products.</li>
+          <li>Saves named packages under the active user account.</li>
+          <li>Builds reusable prompts for avatar and product reference images.</li>
+          <li>Uses a Chrome extension to open Google Flow or ChatGPT Images with an active package session.</li>
+          <li>Lets the extension paste prompts, detect generated images, and save selected images back into the app package.</li>
+          <li>Keeps extension imports linked to the user who started the generation session.</li>
+          <li>Shows a Library with search, grouping, sorting, recent images, storage estimate, image removal, and Higgsfield asset status.</li>
+          <li>Connects to Higgsfield through OAuth.</li>
+          <li>Creates Higgsfield Marketing Studio assets from Library packages.</li>
+          <li>Supports local demo users and Supabase-backed user approval when configured.</li>
+          <li>Runs on Vercel for testing.</li>
+        </ul>
+      </section>
+
+      <section>
+        <h2>Current Status</h2>
+        <p>
+          The app is an MVP/prototype. The main structure is working locally and
+          deployed on Vercel, but the most important external workflows still need
+          full live testing with real connected accounts.
+        </p>
+        <ul>
+          <li>Unit and integration tests: <code>npm test</code> passes.</li>
+          <li>Production build: <code>npm run build</code> passes.</li>
+          <li>Vercel deployment: production alias is live.</li>
+          <li>Higgsfield FNF proxy route is deployed and protected.</li>
+        </ul>
+      </section>
+
+      <section>
+        <h2>Main Problem Still Needing Testing</h2>
+        <p>
+          The biggest remaining problem is live end-to-end testing across third-party
+          websites and accounts. Google Flow, ChatGPT Images, and Higgsfield can
+          change their UI or API behavior.
+        </p>
+        <ol>
+          <li>Create a package in the app.</li>
+          <li>Open Google Flow or ChatGPT Images from Prompt Builder.</li>
+          <li>Paste the prompt with the extension.</li>
+          <li>Generate an image.</li>
+          <li>Save that generated image back to the correct app account and package.</li>
+          <li>Open Library.</li>
+          <li>Create the Higgsfield Marketing Studio asset.</li>
+          <li>Confirm that the asset appears and is usable inside the connected Higgsfield account.</li>
+        </ol>
+        <p>
+          The final Higgsfield asset creation step was not live-tested because it
+          creates an external asset in the user's Higgsfield account. That should
+          only be tested with explicit approval and a real package image.
+        </p>
+      </section>
+
+      <div class="grid">
+        <section>
+          <h2>What Is Working</h2>
+          <ul>
+            <li>The app builds and deploys on Vercel.</li>
+            <li>Demo accounts work locally for quick testing.</li>
+            <li>The account approval model exists.</li>
+            <li>Packages are separated by account.</li>
+            <li>Library can show, sort, search, and remove package images.</li>
+            <li>Extension imports are guarded by user/package ownership.</li>
+            <li>ChatGPT Images opens at <code>https://chatgpt.com/images</code>.</li>
+            <li>Google Flow model preference defaults to Nano Banana Pro.</li>
+            <li>The old hidden reference upload was replaced by a Marketing Studio asset flow.</li>
+          </ul>
+        </section>
+
+        <section>
+          <h2>What Still Needs Live Testing</h2>
+          <ul>
+            <li>Google Flow prompt insertion and Nano Banana Pro selection.</li>
+            <li>Google Flow and ChatGPT generate button behavior.</li>
+            <li>Extension save button detection on generated results.</li>
+            <li>Save-to-app flow after logout/login.</li>
+            <li>Supabase persistence after logout/login on production.</li>
+            <li>Image removal from local state and server state.</li>
+            <li>Higgsfield OAuth connection on production.</li>
+            <li>Marketing Studio avatar and product creation with real packages.</li>
+            <li>Whether created Higgsfield assets appear where expected in the Higgsfield website.</li>
+            <li>Multi-user testing where two people generate at the same time.</li>
+          </ul>
+        </section>
+      </div>
+
+      <section>
+        <h2>What Still Needs Development</h2>
+        <ul>
+          <li>Real image file storage using Supabase Storage, Vercel Blob, Cloudflare R2, or another bucket.</li>
+          <li>Stronger production authentication and role management.</li>
+          <li>Better admin screens for approving, blocking, and auditing users.</li>
+          <li>More visible asset history: asset ID, date, type, selected images, and error logs.</li>
+          <li>Better retry and failure messages for Higgsfield asset creation.</li>
+          <li>A setup checklist for Supabase, Vercel, extension install, and Higgsfield connection.</li>
+          <li>Extension packaging and versioning so users know when they must update.</li>
+          <li>Full browser E2E tests for the app and extension.</li>
+          <li>A clear roadmap separating MVP, beta, and production phases.</li>
+          <li>More polished package organization, naming, duplicate detection, and bulk actions.</li>
+          <li>Better storage quota warnings and cleanup tools.</li>
+          <li>Privacy/security review for extension permissions, OAuth tokens, and third-party proxy routes.</li>
+        </ul>
+      </section>
+
+      <section>
+        <h2>Suggested Next Work Plan</h2>
+        <ol>
+          <li>Test the app with one avatar package end to end.</li>
+          <li>Test the app with one product package end to end.</li>
+          <li>Confirm Higgsfield Marketing Studio assets appear in the connected account.</li>
+          <li>Add real object storage for images.</li>
+          <li>Add live E2E test scripts for the extension and app.</li>
+          <li>Improve the Library asset history and error logs.</li>
+          <li>Clean up onboarding so a new user knows exactly what to install, connect, and test.</li>
+          <li>Decide whether the extension remains local-only or later becomes a Chrome Web Store extension.</li>
+        </ol>
+      </section>
+
+      <section>
+        <h2>Honest Product Readiness Verdict</h2>
+        <p>
+          This app is useful as a prototype and development base. It is not ready
+          yet as a finished production tool.
+        </p>
+        <p>
+          The core idea is strong: organize avatar and product references, let the
+          user generate in their own browser accounts, then save and prepare assets
+          for Higgsfield workflows. The next milestone is proving the full live
+          workflow with real accounts and real assets, then improving storage,
+          reliability, and user onboarding.
+        </p>
+      </section>
+    </main>
+  </body>
+</html>
