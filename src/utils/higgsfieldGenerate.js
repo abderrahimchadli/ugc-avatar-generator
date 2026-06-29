@@ -401,7 +401,7 @@ async function pollVideoJobs(jobIds, total, onProgress, onPartialResults, isCanc
 
 // Shared upload pipeline for any media kind. Caches by fingerprint so the same
 // data URL is never uploaded twice. Returns the CDN URL (or media_id as fallback).
-async function uploadMedia(dataUrl, { type, defaultContentType, getExt, prefix }) {
+export async function uploadMedia(dataUrl, { type, defaultContentType, getExt, prefix }) {
   const fp = mediaFingerprint(dataUrl)
   if (_mediaCache.has(fp)) {
     hflog(`[HF] media cache hit (${type}) — skipping upload`)
@@ -697,7 +697,7 @@ export async function pollAllJobs(jobIds, total, onProgress, _staleTolerance = 8
   throw new Error('Generation timed out — check Higgsfield dashboard')
 }
 
-const uploadRefImage = dataUrl => uploadMedia(dataUrl, {
+export const uploadRefImage = dataUrl => uploadMedia(dataUrl, {
   type: 'image',
   defaultContentType: 'image/jpeg',
   getExt: ct => ct.includes('png') ? 'png' : 'jpeg',

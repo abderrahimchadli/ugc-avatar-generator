@@ -1,0 +1,53 @@
+#ugc-bridge-panel {
+  position: fixed;
+  top: 88px;
+  right: 18px;
+  z-index: 2147483647;
+  width: 230px;
+  padding: 12px;
+  border-radius: 12px;
+  background: rgba(18, 18, 24, 0.92);
+  color: white;
+  font-family: Inter, Arial, sans-serif;
+  box-shadow: 0 12px 40px rgba(0,0,0,0.32);
+  backdrop-filter: blur(14px);
+}
+
+#ugc-bridge-panel .ugc-title {
+  font-weight: 800;
+  font-size: 14px;
+  margin-bottom: 4px;
+}
+
+#ugc-bridge-panel .ugc-session {
+  color: rgba(255,255,255,0.72);
+  font-size: 12px;
+  line-height: 1.35;
+  margin-bottom: 10px;
+}
+
+#ugc-bridge-panel button,
+.ugc-save-image {
+  border: 0;
+  border-radius: 8px;
+  background: #fff;
+  color: #111;
+  font-size: 12px;
+  font-weight: 750;
+  padding: 8px 10px;
+  cursor: pointer;
+}
+
+#ugc-bridge-panel button {
+  width: 100%;
+  margin-top: 6px;
+}
+
+.ugc-save-image {
+  position: absolute;
+  right: 10px;
+  bottom: 10px;
+  z-index: 2147483646;
+  box-shadow: 0 6px 18px rgba(0,0,0,0.28);
+}
+

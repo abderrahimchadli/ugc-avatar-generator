@@ -1,52 +1,50 @@
-import { useState, useEffect } from 'react'
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
+import { useEffect } from 'react'
+import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom'
 import { Analytics } from '@vercel/analytics/react'
-import { ThemeProvider, useTheme } from './context/theme'
-import { StoreProvider } from './store'
+import { ThemeProvider } from './context/theme'
+import { AuthProvider, useAuth } from './context/auth'
+import { PackageProvider } from './context/packageStore'
 import { silentRefreshHFToken } from './utils/higgsfieldAuth'
 import Nav from './components/Nav'
-import Landing from './pages/Landing'
-import Influencers from './pages/Influencers'
-import Inspiration from './pages/Inspiration'
-import BrandDeals from './pages/BrandDeals'
-import Create from './pages/Create'
+import Home from './pages/Home'
+import Login from './pages/Login'
+import WaitingApproval from './pages/WaitingApproval'
+import Packages from './pages/Packages'
+import PromptBuilder from './pages/PromptBuilder'
+import Library from './pages/Library'
 import Settings from './pages/Settings'
 import AuthCallback from './pages/AuthCallback'
+import ExtensionImport from './pages/ExtensionImport'
+import AdminUsers from './pages/AdminUsers'
 
-const FEEDBACK_FORM_URL = 'https://forms.gle/p5cBXw4sYaHPdcANA'
+function RequireApproved({ children }) {
+  const { loading, profile, isApproved } = useAuth()
+  if (loading) return <main className="page-shell"><section className="panel"><h1>Loading…</h1></section></main>
+  if (!profile) return <Navigate to="/login" replace />
+  if (!isApproved) return <Navigate to="/waiting-approval" replace />
+  return children
+}
 
-function FeedbackButton() {
-  const { isDark } = useTheme()
-  const [hover, setHover] = useState(false)
-
+function AppRoutes() {
   return (
-    <a
-      href={FEEDBACK_FORM_URL}
-      target="_blank"
-      rel="noopener noreferrer"
-      title="Something broke? Have an idea? Send feedback"
-      onMouseEnter={() => setHover(true)}
-      onMouseLeave={() => setHover(false)}
-      style={{
-        position: 'fixed', bottom: 24, right: 24, zIndex: 200,
-        display: 'flex', alignItems: 'center', gap: 8,
-        height: 44, padding: '0 16px', borderRadius: 22,
-        background: isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.06)',
-        border: isDark ? '1px solid rgba(255,255,255,0.12)' : '1px solid rgba(0,0,0,0.08)',
-        backdropFilter: 'blur(12px)',
-        color: isDark ? 'rgba(255,255,255,0.85)' : 'rgba(0,0,0,0.7)',
-        fontSize: 14, fontWeight: 600, textDecoration: 'none',
-        cursor: 'pointer',
-        boxShadow: isDark ? '0 2px 12px rgba(0,0,0,0.4)' : '0 2px 12px rgba(0,0,0,0.10)',
-        transform: hover ? 'translateY(-2px)' : 'none',
-        transition: 'transform 0.18s cubic-bezier(0.34,1.56,0.64,1), background 0.18s',
-      }}
-    >
-      <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-        <path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/>
-      </svg>
-      Feedback
-    </a>
+    <>
+      <Nav />
+      <Routes>
+        <Route path="/" element={<RequireApproved><Home /></RequireApproved>} />
+        <Route path="/login" element={<Login />} />
+        <Route path="/waiting-approval" element={<WaitingApproval />} />
+        <Route path="/avatars" element={<RequireApproved><Packages type="avatar" /></RequireApproved>} />
+        <Route path="/products" element={<RequireApproved><Packages type="product" /></RequireApproved>} />
+        <Route path="/prompt-builder" element={<RequireApproved><PromptBuilder /></RequireApproved>} />
+        <Route path="/library" element={<RequireApproved><Library /></RequireApproved>} />
+        <Route path="/users" element={<RequireApproved><AdminUsers /></RequireApproved>} />
+        <Route path="/settings" element={<Settings />} />
+        <Route path="/extension-import" element={<RequireApproved><ExtensionImport /></RequireApproved>} />
+        <Route path="/auth/callback" element={<AuthCallback />} />
+        <Route path="*" element={<Navigate to="/" replace />} />
+      </Routes>
+      <Analytics />
+    </>
   )
 }
 
@@ -62,23 +60,14 @@ export default function App() {
 
   return (
     <ThemeProvider>
-    <StoreProvider>
-    <BrowserRouter>
-      <Nav />
-      <Routes>
-        <Route path="/" element={<Landing />} />
-        <Route path="/influencers" element={<Influencers />} />
-        <Route path="/inspiration" element={<Inspiration />} />
-        <Route path="/brand-deals" element={<BrandDeals />} />
-        <Route path="/create" element={<Create />} />
-        <Route path="/settings" element={<Settings />} />
-        <Route path="/auth/callback" element={<AuthCallback />} />
-        <Route path="*" element={<Navigate to="/" replace />} />
-      </Routes>
-      <FeedbackButton />
-      <Analytics />
-    </BrowserRouter>
-    </StoreProvider>
+      <AuthProvider>
+        <PackageProvider>
+          <BrowserRouter>
+            <AppRoutes />
+          </BrowserRouter>
+        </PackageProvider>
+      </AuthProvider>
     </ThemeProvider>
   )
 }
+

@@ -1,69 +1,80 @@
-# AI Influencer Studio
+# UGC Avatar Generator
 
-A local-first web app for building, managing, and generating AI influencers.
-React + Vite frontend, Higgsfield for image & video generation, your own
-Higgsfield account, your data lives in your browser.
+Avatar and product package studio for Vercel. The app creates named reusable
+packages, builds strong prompts, imports images from Google Flow or ChatGPT
+Image 2 through a Chrome extension, and uploads selected packages to a connected
+Higgsfield account.
 
----
+## What this MVP does
 
-## Setup (no tech experience needed)
+- Stores two package groups: `Avatars` and `Products`.
+- Builds prompts for portraits, full-body references, pose sheets, expression
+  sheets, product packshots, product style sheets, and avatar + product UGC.
+- Uses a Chrome extension as a browser bridge for Google Flow and ChatGPT.
+- Imports selected generated images back into the correct package session.
+- Uploads selected package images to Higgsfield using the existing account
+  connection.
+- Supports Supabase Auth approval when configured, and local demo mode when not.
 
-You only install one thing — **Antigravity**. Everything else lives inside
-it. Just follow these steps in order.
+## Local setup
 
-1. **Download the project.** Go to the
-   [GitHub page](https://github.com/DaanKieft/ai-influencer), click the green
-   **Code** button → **Download ZIP**, then unzip it onto your Desktop.
-2. **Install Antigravity.** Search "Antigravity" on Google (or go to
-   [antigravity.dev](https://antigravity.dev)) and install it like any app.
-3. **Open the project.** In Antigravity, click **File → Open Folder** and pick
-   the unzipped folder.
-4. **Add Claude.** Click the **Extensions** icon in the left sidebar, search
-   **Claude Code**, click **Install**, and sign in with your Anthropic account.
-5. **Start it.** Open **Terminal → New Terminal**, type `claude`, press Enter,
-   then tell Claude: *"install everything and start the app."*
-6. **Open it.** When Claude says it's running, it will show a web address
-   (something like `http://localhost:5173` — the number may differ on your
-   computer). Open that address in Chrome.
-7. **Connect Higgsfield.** In the app: **Settings → Connect Higgsfield** (uses
-   your own Higgsfield credits).
-
-That's it. Stuck on anything? Just ask Claude in the terminal — that's what
-it's there for. To change something, tell it: *"change the homepage
-headline,"* *"add a new vibe option,"* etc.
-
----
-
-## Updating
-
-In the terminal, type `claude` and tell it: *"get the latest version."*
-
-Your saved data (influencers, brand deals, inspiration boards) stays in your
-browser and survives updates.
-
----
-
-## Project structure
-
-```
-src/
-  pages/           Routes: Landing, Influencers, Inspiration, BrandDeals, Create, Settings
-  components/      Reusable UI: Nav, ImageGrid, MasonryGrid, Lightbox
-  context/         React contexts (theme)
-  utils/           Higgsfield API, OAuth, prompt builders, image helpers
-  store.jsx        localStorage-backed React contexts
-api/               Vercel serverless functions (proxies + image proxy)
-docs/              Prompt engineering reference docs
+```bash
+npm install
+npm run dev
 ```
 
----
+Open `http://localhost:5173`.
 
-## Deployment (optional)
-   
-The repo is Vercel-ready. Connect the GitHub repo at vercel.com → it
-auto-detects Vite + the `api/` folder and deploys in ~60 seconds. End
-users still bring their own Higgsfield account.
+Without Supabase env vars the app runs in demo mode with a local super user.
 
----
+## Vercel env vars
 
-Made by Dan Kieft.
+Required for real auth and approval:
+
+```text
+VITE_SUPABASE_URL=
+VITE_SUPABASE_ANON_KEY=
+SUPABASE_SERVICE_ROLE_KEY=
+ADMIN_EMAILS=your@email.com
+```
+
+Run `src/api/schema.sql` in Supabase SQL editor before enabling real users.
+
+No OpenAI or Gemini API key is required for this MVP. Generation happens in
+Google Flow or ChatGPT through the user's own logged-in browser account.
+
+## Chrome extension
+
+1. Open Chrome `chrome://extensions`.
+2. Enable Developer Mode.
+3. Click **Load unpacked**.
+4. Select the `extension/` folder.
+5. Open the app, create/select a package, and click **Open in Google Flow** or
+   **Open in ChatGPT** from Prompt Builder.
+
+The extension:
+
+- remembers the active package/session;
+- pastes the prepared prompt into Flow or ChatGPT;
+- detects large generated images in the active tab;
+- adds **Save to App** buttons;
+- imports the selected image into the active package.
+
+## Higgsfield upload
+
+Connect Higgsfield in Settings, then open Library and click:
+
+```text
+Upload package to Higgsfield
+```
+
+The app uploads images with Higgsfield `media_upload` and `media_confirm`, then
+saves returned media URLs in the package metadata.
+
+## Notes
+
+- `Remove from server` is intentionally disabled until a real image bucket such
+  as Supabase Storage, Cloudflare R2, or Vercel Blob is connected.
+- The extension is a user-controlled browser helper, not a private API scraper.
+- Google Flow and ChatGPT UI changes may require extension selector updates.
+
