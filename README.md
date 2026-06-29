@@ -71,18 +71,18 @@ The extension:
 - imports the selected image into the active package.
 - preserves the import when the app asks the user to sign in first.
 
-## Higgsfield upload
+## Higgsfield assets
 
 Connect Higgsfield in Settings, then open Library and click:
 
 ```text
-Prepare Higgsfield references
+Create Higgsfield asset
 ```
 
-The app uploads images with Higgsfield `media_upload` and `media_confirm`, then
-saves returned reference media URLs/IDs in the package metadata. These references
-are prepared for use in generation workflows; Higgsfield may not show them as
-visible assets inside the Higgsfield website library.
+The app uploads the package images through Higgsfield's media endpoint, then
+creates a Marketing Studio avatar or product asset. The returned asset ID is
+saved on the package so the Library shows which packages have been sent to
+Higgsfield for reuse in ad and video workflows.
 
 ## Notes
 

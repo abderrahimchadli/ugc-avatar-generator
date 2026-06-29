@@ -541,6 +541,27 @@ textarea {
   font-size: 12px;
 }
 
+.asset-summary {
+  display: grid;
+  gap: 4px;
+  margin-top: 10px;
+  padding: 10px;
+  border-radius: 8px;
+  background: rgba(16, 185, 129, 0.1);
+  border: 1px solid rgba(16, 185, 129, 0.22);
+}
+
+.asset-summary strong {
+  color: var(--text-primary);
+  font-size: 13px;
+}
+
+.asset-summary span {
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
 .builder-grid {
   display: grid;
   grid-template-columns: minmax(280px, 0.75fr) minmax(0, 1.25fr);

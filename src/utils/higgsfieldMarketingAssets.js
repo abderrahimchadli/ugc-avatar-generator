@@ -1,0 +1,244 @@
+import { getHFToken, refreshHFToken } from './higgsfieldAuth.js'
+
+const FNF_PROXY = '/api/fnf'
+const MAX_PRODUCT_IMAGES = 8
+
+export const HIGGSFIELD_ASSET_NOTE = 'Created as a Higgsfield Marketing Studio asset for reuse in Higgsfield ad and video workflows.'
+
+function sleep(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms))
+}
+
+function safeName(value, fallback = 'package') {
+  const cleaned = String(value || fallback)
+    .replace(/[^\w.-]+/g, '_')
+    .replace(/^_+|_+$/g, '')
+    .slice(0, 80)
+  return cleaned || fallback
+}
+
+function contentTypeToExt(contentType) {
+  if (/png/i.test(contentType)) return 'png'
+  if (/webp/i.test(contentType)) return 'webp'
+  if (/gif/i.test(contentType)) return 'gif'
+  return 'jpg'
+}
+
+function parseResponseText(text) {
+  if (!text) return null
+  try { return JSON.parse(text) } catch { return text }
+}
+
+function readableApiError(status, data, fallback = '') {
+  const text = typeof data === 'string'
+    ? data
+    : data?.error_description || data?.error || data?.message || data?.detail || fallback
+  const suffix = text ? `: ${String(text).slice(0, 240)}` : ''
+  return `Higgsfield asset API error ${status}${suffix}`
+}
+
+function makeApiError(status, data, fallback = '') {
+  const error = new Error(readableApiError(status, data, fallback))
+  error.status = status
+  error.data = data
+  return error
+}
+
+async function fnfRequest(path, { method = 'GET', body = null, headers = {} } = {}, isRetry = false) {
+  const token = getHFToken()
+  const requestHeaders = {
+    Accept: 'application/json',
+    Authorization: `Bearer ${token}`,
+    ...headers,
+  }
+  let requestBody = body
+  if (body && !(body instanceof Blob) && typeof body !== 'string') {
+    requestHeaders['Content-Type'] = requestHeaders['Content-Type'] || 'application/json'
+    requestBody = JSON.stringify(body)
+  }
+
+  const res = await fetch(`${FNF_PROXY}${path}`, {
+    method,
+    headers: requestHeaders,
+    body: requestBody,
+  })
+
+  if (res.status === 401 && !isRetry) {
+    await refreshHFToken()
+    return fnfRequest(path, { method, body, headers }, true)
+  }
+
+  const text = await res.text().catch(() => '')
+  const data = parseResponseText(text)
+  if (!res.ok) throw makeApiError(res.status, data, text)
+  return data
+}
+
+async function postFirstSuccessful(candidates) {
+  let lastError = null
+  for (const candidate of candidates) {
+    try {
+      return await fnfRequest(candidate.path, {
+        method: candidate.method || 'POST',
+        body: candidate.body,
+      })
+    } catch (error) {
+      lastError = error
+      if (![400, 404, 415, 422].includes(error.status)) throw error
+    }
+  }
+  throw lastError || new Error('Higgsfield asset request failed.')
+}
+
+function extractUploadSlot(data) {
+  const slot = Array.isArray(data)
+    ? data[0]
+    : data?.upload || data?.media || data?.slot || data?.data || data
+  const id = slot?.id || slot?.media_id || slot?.mediaId || data?.id
+  const uploadUrl = slot?.upload_url || slot?.uploadUrl || slot?.url || data?.upload_url
+  if (!id || !uploadUrl) {
+    throw new Error('Higgsfield did not return a usable upload slot.')
+  }
+  return { id, uploadUrl }
+}
+
+function mediaStatus(data) {
+  return String(data?.status || data?.media?.status || data?.data?.status || '').toLowerCase()
+}
+
+async function createFnfUpload({ filename, contentType, length, type = 'image' }) {
+  const query = new URLSearchParams({ type })
+  const fullQuery = new URLSearchParams({
+    type,
+    filename,
+    content_type: contentType,
+    length: String(length),
+  })
+
+  const data = await postFirstSuccessful([
+    {
+      path: `/developer/v2alpha/media?${query}`,
+      body: { filename, content_type: contentType, length },
+    },
+    {
+      path: '/developer/v2alpha/media',
+      body: { type, filename, content_type: contentType, length },
+    },
+    {
+      path: `/developer/v2alpha/media?${fullQuery}`,
+      body: null,
+    },
+  ])
+  return extractUploadSlot(data)
+}
+
+async function confirmFnfUpload(id, type = 'image') {
+  let lastData = null
+  for (let attempt = 0; attempt < 6; attempt += 1) {
+    const query = new URLSearchParams({ type })
+    const data = await postFirstSuccessful([
+      { path: `/developer/v2alpha/media/${encodeURIComponent(id)}/confirm?${query}`, body: null },
+      { path: `/developer/v2alpha/media/${encodeURIComponent(id)}/confirm`, body: { type } },
+    ])
+    lastData = data
+    const status = mediaStatus(data)
+    if (!status || /completed|complete|ready|usable|succeeded|success/.test(status)) return data
+    await sleep(500 + attempt * 250)
+  }
+  const status = mediaStatus(lastData) || 'unknown'
+  throw new Error(`Uploaded media ${id} is not usable yet (status ${status}).`)
+}
+
+export async function uploadMarketingImage(dataUrl, { packageName = 'package', index = 1 } = {}) {
+  const res = await fetch(dataUrl)
+  if (!res.ok) throw new Error(`Could not read package image (${res.status}).`)
+  const blob = await res.blob()
+  const contentType = blob.type || 'image/jpeg'
+  const filename = `${safeName(packageName)}_${index}.${contentTypeToExt(contentType)}`
+  const slot = await createFnfUpload({
+    filename,
+    contentType,
+    length: blob.size,
+    type: 'image',
+  })
+  const putRes = await fetch(slot.uploadUrl, {
+    method: 'PUT',
+    body: blob,
+    headers: { 'Content-Type': contentType },
+  })
+  if (!putRes.ok) throw new Error(`Higgsfield image upload failed: ${putRes.status}`)
+  const confirmation = await confirmFnfUpload(slot.id, 'image')
+  return {
+    id: slot.id,
+    uploadUrl: slot.uploadUrl,
+    contentType,
+    sizeBytes: blob.size,
+    confirmation,
+  }
+}
+
+export function selectPackageImagesForMarketingAsset(pack) {
+  const items = (pack?.items || []).filter(item => item?.url)
+  if (pack?.type === 'avatar') {
+    const preferred = items.find(item => /main|portrait|hero|face/i.test(`${item.mode || ''} ${item.label || ''}`))
+      || items[0]
+    return preferred ? [preferred] : []
+  }
+  return items.slice(0, MAX_PRODUCT_IMAGES)
+}
+
+export function buildMarketingAssetRequestCandidates(pack, uploadIds) {
+  const name = String(pack?.name || '').trim() || 'Untitled package'
+  const description = String(pack?.notes || pack?.identityLock || pack?.styleLock || '').trim()
+  if (pack?.type === 'product') {
+    return [
+      { path: '/developer/v1alpha/marketing-studio/products', body: { title: name, description, images: uploadIds } },
+      { path: '/developer/v1alpha/marketing-studio/products', body: { title: name, description, image_ids: uploadIds } },
+      { path: '/developer/v1alpha/marketing-studio/products', body: { title: name, description, image: uploadIds } },
+    ]
+  }
+  const imageId = uploadIds[0]
+  return [
+    { path: '/developer/v1alpha/marketing-studio/avatars', body: { name, image: imageId, pinned: true } },
+    { path: '/developer/v1alpha/marketing-studio/avatars', body: { name, image_id: imageId, pinned: true } },
+    { path: '/developer/v1alpha/marketing-studio/avatars', body: { name, images: [imageId], pinned: true } },
+  ]
+}
+
+function normalizeCreatedAsset(pack, data, uploads, selectedItems) {
+  const root = data?.data || data?.avatar || data?.product || data
+  const id = root?.id || data?.id || data?.uuid || data?.product_id || data?.avatar_id
+  if (!id) throw new Error('Higgsfield created the asset but did not return an asset id.')
+  return {
+    id,
+    type: pack.type === 'product' ? 'marketing_product' : 'marketing_avatar',
+    label: pack.type === 'product' ? 'Marketing Studio product' : 'Marketing Studio avatar',
+    visibleInHiggsfield: true,
+    createdAt: Date.now(),
+    uploadIds: uploads.map(upload => upload.id),
+    itemIds: selectedItems.map(item => item.id),
+    note: HIGGSFIELD_ASSET_NOTE,
+    raw: root,
+  }
+}
+
+export async function createPackageMarketingAsset(pack, onProgress) {
+  const selectedItems = selectPackageImagesForMarketingAsset(pack)
+  if (!selectedItems.length) throw new Error('Add at least one image before creating a Higgsfield asset.')
+
+  const uploads = []
+  for (let i = 0; i < selectedItems.length; i += 1) {
+    onProgress?.({ phase: 'upload', index: i + 1, total: selectedItems.length, item: selectedItems[i] })
+    uploads.push(await uploadMarketingImage(selectedItems[i].url, {
+      packageName: pack.name,
+      index: i + 1,
+    }))
+  }
+
+  onProgress?.({ phase: 'asset', index: uploads.length, total: uploads.length })
+  const data = await postFirstSuccessful(buildMarketingAssetRequestCandidates(
+    pack,
+    uploads.map(upload => upload.id)
+  ))
+  return normalizeCreatedAsset(pack, data, uploads, selectedItems)
+}
