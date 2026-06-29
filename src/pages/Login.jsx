@@ -1,6 +1,7 @@
 import { useState } from 'react'
-import { Navigate, useNavigate } from 'react-router-dom'
+import { Navigate, useNavigate, useSearchParams } from 'react-router-dom'
 import { useAuth } from '../context/auth'
+import { safeReturnTo } from '../utils/navigation'
 
 const DEMO_PASSWORDS = {
   'demo-abderrahim': 'Abderrahim#UGC26',
@@ -11,13 +12,15 @@ const DEMO_PASSWORDS = {
 export default function Login() {
   const { profile, signIn, signUp, isApproved, hasSupabaseConfig, demoAccounts } = useAuth()
   const navigate = useNavigate()
+  const [params] = useSearchParams()
+  const returnTo = safeReturnTo(params.get('returnTo'))
   const [mode, setMode] = useState('signin')
   const [displayName, setDisplayName] = useState('')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
 
-  if (profile && isApproved) return <Navigate to="/" replace />
+  if (profile && isApproved) return <Navigate to={returnTo} replace />
   if (profile && !isApproved) return <Navigate to="/waiting-approval" replace />
 
   async function submit(e) {
@@ -25,7 +28,7 @@ export default function Login() {
     setError('')
     const result = mode === 'signin' ? await signIn(email, password) : await signUp(email, password, displayName)
     if (result?.error) setError(result.error.message)
-    else navigate(mode === 'signup' ? '/waiting-approval' : '/')
+    else navigate(mode === 'signup' ? '/waiting-approval' : returnTo)
   }
 
   function fillDemoAccount(account) {

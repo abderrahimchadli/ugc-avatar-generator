@@ -555,6 +555,69 @@ textarea {
   background: var(--bg-tertiary);
 }
 
+.library-toolbar {
+  display: grid;
+  grid-template-columns: minmax(220px, 1fr) 180px 190px;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.library-sync {
+  margin: -2px 0 16px;
+}
+
+.recent-strip {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(210px, 1fr);
+  gap: 12px;
+  overflow-x: auto;
+  margin-bottom: 16px;
+  padding-bottom: 4px;
+}
+
+.recent-thumb {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: 58px minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+  padding: 10px;
+  border-radius: 12px;
+  background: var(--surface);
+  border: 1px solid var(--border-subtle);
+}
+
+.recent-thumb img {
+  width: 58px;
+  height: 58px;
+  border-radius: 8px;
+  object-fit: cover;
+  background: var(--bg-tertiary);
+}
+
+.recent-thumb strong,
+.recent-thumb span {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.recent-thumb span {
+  margin-top: 4px;
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.empty-library {
+  min-height: 180px;
+  display: grid;
+  align-content: center;
+  gap: 8px;
+}
+
 .settings-row,
 .user-row {
   display: flex;
@@ -614,6 +677,7 @@ textarea {
   }
   .hero-panel { padding: 28px; }
   .inline-form { grid-template-columns: 1fr; }
+  .library-toolbar { grid-template-columns: 1fr; }
   .account-picks { grid-template-columns: 1fr; }
   .nav-links { display: none; }
 }

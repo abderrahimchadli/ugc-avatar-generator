@@ -21,7 +21,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 
   if (message?.type === 'STORE_IMPORT') {
     const importId = `imp_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
-    chrome.storage.local.set({ [`import:${importId}`]: message.payload }, () => {
+    chrome.storage.local.set({ [`import:${importId}`]: { ...message.payload, importId, storedAt: Date.now() } }, () => {
       const appUrl = UGCBridgeCore.getImportAppUrl(message.payload)
       chrome.tabs.create({ url: `${appUrl}/extension-import?importId=${encodeURIComponent(importId)}` })
       sendResponse({ ok: true, importId })

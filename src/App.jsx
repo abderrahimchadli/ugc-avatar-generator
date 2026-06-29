@@ -1,5 +1,5 @@
 import { useEffect } from 'react'
-import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom'
+import { BrowserRouter, Navigate, Route, Routes, useLocation } from 'react-router-dom'
 import { Analytics } from '@vercel/analytics/react'
 import { ThemeProvider } from './context/theme'
 import { AuthProvider, useAuth } from './context/auth'
@@ -17,11 +17,13 @@ import AuthCallback from './pages/AuthCallback'
 import ExtensionImport from './pages/ExtensionImport'
 import AdminUsers from './pages/AdminUsers'
 import ExtensionSetup from './pages/ExtensionSetup'
+import { loginPathForReturn } from './utils/navigation'
 
 function RequireApproved({ children }) {
   const { loading, profile, isApproved } = useAuth()
+  const location = useLocation()
   if (loading) return <main className="page-shell"><section className="panel"><h1>Loading…</h1></section></main>
-  if (!profile) return <Navigate to="/login" replace />
+  if (!profile) return <Navigate to={loginPathForReturn(location.pathname, location.search)} replace />
   if (!isApproved) return <Navigate to="/waiting-approval" replace />
   return children
 }

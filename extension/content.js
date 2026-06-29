@@ -75,11 +75,23 @@ async function fillPrompt() {
     navigator.clipboard?.writeText(activeSession.prompt)
     return alert('Prompt copied. Paste it into the prompt box manually.')
   }
-  const result = UGCBridgeCore.writePromptToTarget(target, activeSession.prompt)
+  const result = await UGCBridgeCore.writePromptToTargetAsync(target, activeSession.prompt)
   if (!result.ok) {
     navigator.clipboard?.writeText(activeSession.prompt)
-    setStatus('Prompt copied. Paste manually if Flow still says it is empty.')
+    if (result.visibleDom && UGCBridgeCore.isFlowHost(location.host)) {
+      setStatus('Flow shows the text, but Create is still disabled. Prompt copied for manual paste.')
+    } else {
+      setStatus('Prompt copied. Paste manually if Flow still says it is empty.')
+    }
     return
+  }
+  if (UGCBridgeCore.isFlowHost(location.host)) {
+    const accepted = await waitForGenerateReady(1800)
+    if (!accepted) {
+      navigator.clipboard?.writeText(activeSession.prompt)
+      setStatus('Flow did not enable Create after paste. Prompt copied for manual paste.')
+      return
+    }
   }
   setStatus('Prompt pasted into the active editor.')
 }
@@ -129,7 +141,7 @@ async function selectPreferredFlowModel() {
   const labels = UGCBridgeCore.getPreferredFlowModelLabels(activeSession)
   const openOption = findOpenModelOption(labels)
   if (openOption) {
-    openOption.click()
+    clickElementLikeUser(openOption)
     setStatus(`Selected ${labels[0]}.`)
     return true
   }
@@ -145,14 +157,14 @@ async function selectPreferredFlowModel() {
     return false
   }
 
-  trigger.click()
+  clickElementLikeUser(trigger)
   await wait(450)
   const option = findOpenModelOption(labels) || findClickableByLabels(labels)
   if (!option) {
     setStatus(`Could not find ${labels[0]} in the open model menu.`)
     return false
   }
-  option.click()
+  clickElementLikeUser(option)
   setStatus(`Selected ${labels[0]}.`)
   return true
 }
@@ -221,7 +233,7 @@ async function clickGenerate() {
   await wait(250)
   const target = findGenerateButton()
   if (target) {
-    target.click()
+    clickElementLikeUser(target)
     setStatus('Clicked the generate button.')
     return
   }
@@ -233,6 +245,15 @@ async function clickGenerate() {
   }
 
   alert('Could not find a generate button. Click it manually, then use Save to App on the result.')
+}
+
+async function waitForGenerateReady(timeoutMs = 1500) {
+  const started = Date.now()
+  while (Date.now() - started < timeoutMs) {
+    if (findGenerateButton()) return true
+    await wait(120)
+  }
+  return Boolean(findGenerateButton())
 }
 
 function findGenerateButton() {
@@ -276,6 +297,21 @@ function generateButtonScore(el) {
   if (/cancel|stop|close|menu|model|settings|help|upgrade/i.test(text)) score -= 100
   score -= Math.min(area(el) / 10000, 30)
   return score
+}
+
+function clickElementLikeUser(el) {
+  if (!el) return false
+  const win = el.ownerDocument?.defaultView || window
+  el.focus?.()
+  for (const type of ['pointerdown', 'mousedown', 'pointerup', 'mouseup', 'click']) {
+    const EventCtor = type.startsWith('pointer') ? (win.PointerEvent || win.MouseEvent) : win.MouseEvent
+    try {
+      el.dispatchEvent(new EventCtor(type, { bubbles: true, cancelable: true, composed: true, button: 0 }))
+    } catch {
+      if (type === 'click') el.click?.()
+    }
+  }
+  return true
 }
 
 function scanImages() {
@@ -327,6 +363,9 @@ async function saveImage(img) {
       appUrl: activeSession.appUrl,
       packageId: activeSession.packageId,
       packageName: activeSession.packageName,
+      ownerId: activeSession.ownerId,
+      ownerEmail: activeSession.ownerEmail,
+      ownerName: activeSession.ownerName,
       mode: activeSession.mode,
       prompt: activeSession.prompt,
       source: UGCBridgeCore.sourceForHost(location.host),

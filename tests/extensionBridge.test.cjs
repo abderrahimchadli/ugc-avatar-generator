@@ -118,7 +118,7 @@ test('writes prompt into contenteditable targets with insertText fallback', () =
   assert.deepEqual(target.events, ['beforeinput', 'beforeinput', 'input', 'change'])
 })
 
-test('writes Flow prompts into the Slate paragraph string structure', () => {
+test('Slate DOM fallback mirrors Flow structure but is not treated as accepted input', () => {
   class FakeEvent {
     constructor(type, options = {}) {
       this.type = type
@@ -176,6 +176,7 @@ test('writes Flow prompts into the Slate paragraph string structure', () => {
       this.children = []
     }
     get innerText() {
+      if (this.tagName === 'DIV') return this.children.map(child => child.innerText || child.textContent || '').join('\n')
       return this.textContent
     }
     get firstChild() {
@@ -223,10 +224,13 @@ test('writes Flow prompts into the Slate paragraph string structure', () => {
   editor.setAttribute('data-slate-editor', 'true')
   editor.setAttribute('contenteditable', 'true')
 
-  const result = core.writePromptToTarget(editor, 'Flow Slate prompt')
-  assert.equal(result.ok, true)
-  assert.equal(result.strategy, 'slate-dom')
-  assert.equal(editor.children.length, 1)
+  const prompt = 'Package name: jack\nMode: main_portrait'
+  const result = core.writePromptToTarget(editor, prompt)
+  assert.equal(result.ok, false)
+  assert.equal(result.visibleDom, true)
+  assert.equal(result.strategy, 'slate-dom-visible-only')
+  assert.equal(result.reason, 'flow-state-not-confirmed')
+  assert.equal(editor.children.length, 2)
 
   const paragraph = editor.children[0]
   const textNode = paragraph.children[0]
@@ -237,8 +241,86 @@ test('writes Flow prompts into the Slate paragraph string structure', () => {
   assert.equal(textNode.getAttribute('data-slate-node'), 'text')
   assert.equal(leaf.getAttribute('data-slate-leaf'), 'true')
   assert.equal(string.getAttribute('data-slate-string'), 'true')
-  assert.equal(string.textContent, 'Flow Slate prompt')
+  assert.equal(string.textContent, 'Package name: jack')
+  assert.equal(editor.children[1].children[0].children[0].children[0].textContent, 'Mode: main_portrait')
   assert.deepEqual(editor.events, ['beforeinput', 'beforeinput', 'input', 'change'])
+})
+
+test('uses clipboard paste for Slate editors when Flow accepts a real paste', async () => {
+  class FakeEvent {
+    constructor(type, options = {}) {
+      this.type = type
+      Object.assign(this, options)
+    }
+  }
+  const editor = {
+    tagName: 'DIV',
+    attributes: { 'data-slate-editor': 'true', contenteditable: 'true' },
+    events: [],
+    textContent: '',
+    innerText: '',
+    firstChild: null,
+    focus() {
+      this.focused = true
+    },
+    click() {
+      this.clicked = true
+    },
+    matches(selector) {
+      return selector.split(',').some(part => {
+        const attr = part.trim().match(/^\[([^=\]]+)(?:="([^"]+)")?\]$/)
+        if (!attr) return false
+        const [, name, value] = attr
+        return value ? this.attributes[name] === value : Object.hasOwn(this.attributes, name)
+      })
+    },
+    querySelector() {
+      return null
+    },
+    dispatchEvent(event) {
+      this.events.push(event.type)
+      return true
+    },
+  }
+  const doc = {
+    clipboardText: '',
+    commands: [],
+    defaultView: {
+      Event: FakeEvent,
+      InputEvent: FakeEvent,
+      navigator: {
+        clipboard: {
+          writeText: async value => {
+            doc.clipboardText = value
+          },
+        },
+      },
+    },
+    getSelection: () => ({ removeAllRanges() {}, addRange() {} }),
+    createRange: () => ({ selectNodeContents() {}, collapse() {}, setStart() {} }),
+    execCommand(command) {
+      this.commands.push(command)
+      if (command === 'delete') {
+        editor.textContent = ''
+        editor.innerText = ''
+        return true
+      }
+      if (command === 'paste') {
+        editor.textContent = this.clipboardText
+        editor.innerText = this.clipboardText
+        return true
+      }
+      return false
+    },
+  }
+  editor.ownerDocument = doc
+
+  const result = await core.writePromptToTargetAsync(editor, 'Package name: jack\nMode: main_portrait')
+  assert.equal(result.ok, true)
+  assert.equal(result.strategy, 'slate-clipboard-paste')
+  assert.equal(doc.clipboardText, 'Package name: jack\nMode: main_portrait')
+  assert.deepEqual(doc.commands, ['delete', 'paste'])
+  assert.match(editor.innerText, /Package name: jack/)
 })
 
 test('submits a prompt through the nearest form when no generate button is found', () => {

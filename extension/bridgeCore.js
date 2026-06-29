@@ -120,11 +120,19 @@
     return String(target.innerText || target.textContent || target.getAttribute?.('aria-label') || '')
   }
 
+  function normalizeComparableText(text) {
+    return String(text || '').replace(/\s+/g, ' ').trim()
+  }
+
   function textWasWritten(target, text) {
     const expected = String(text || '')
     const actual = readTargetText(target)
     if (!expected) return true
-    return actual === expected || actual.includes(expected.slice(0, Math.min(expected.length, 60)))
+    const normalizedExpected = normalizeComparableText(expected)
+    const normalizedActual = normalizeComparableText(actual)
+    return actual === expected
+      || actual.includes(expected.slice(0, Math.min(expected.length, 60)))
+      || (normalizedExpected && normalizedActual.includes(normalizedExpected.slice(0, Math.min(normalizedExpected.length, 60))))
   }
 
   function isSlateTarget(target) {
@@ -179,6 +187,21 @@
     return target.dispatchEvent(event)
   }
 
+  function wait(ms) {
+    return new Promise(resolve => setTimeout(resolve, ms))
+  }
+
+  async function writeClipboardText(win, text) {
+    const clipboard = win?.navigator?.clipboard || global.navigator?.clipboard
+    if (!clipboard?.writeText) return false
+    try {
+      await clipboard.writeText(String(text || ''))
+      return true
+    } catch {
+      return false
+    }
+  }
+
   function dispatchKeyboardEvent(target, type, key, options = {}) {
     const win = target?.ownerDocument?.defaultView || global
     const event = new (win.KeyboardEvent || win.Event)(type, {
@@ -207,6 +230,15 @@
     else target.value = text
   }
 
+  function splitSlateParagraphText(text) {
+    const lines = String(text || '')
+      .replace(/\r\n/g, '\n')
+      .split('\n')
+      .map(part => part.trim())
+      .filter(Boolean)
+    return lines.length ? lines : [String(text || '')]
+  }
+
   function createSlateParagraph(doc, text) {
     const paragraph = doc.createElement('p')
     paragraph.setAttribute('data-slate-node', 'element')
@@ -227,20 +259,61 @@
     return paragraph
   }
 
-  function writePromptToSlateTarget(target, text) {
-    const editor = findSlateEditor(target)
-    if (!editor) return { ok: false, reason: 'missing-slate-editor' }
+  function placeSelectionInEditable(target, selectContents = true) {
+    const doc = target?.ownerDocument || global.document
+    const selection = doc?.getSelection?.()
+    const range = doc?.createRange?.()
+    if (!selection || !range) return false
+    try {
+      if (selectContents) {
+        range.selectNodeContents(target)
+      } else if (target.firstChild) {
+        range.selectNodeContents(target)
+        range.collapse(false)
+      } else {
+        range.setStart(target, 0)
+        range.collapse(true)
+      }
+      selection.removeAllRanges()
+      selection.addRange(range)
+      return true
+    } catch {
+      return false
+    }
+  }
+
+  function clearEditableTarget(target) {
+    const doc = target?.ownerDocument || global.document
+    target.focus?.()
+    placeSelectionInEditable(target, true)
+    dispatchTextEvent(target, 'beforeinput', '', { inputType: 'deleteContentBackward' })
+    const deleted = Boolean(doc?.execCommand?.('delete', false))
+    dispatchTextEvent(target, 'input', '', { inputType: 'deleteContentBackward' })
+    return deleted
+  }
+
+  function insertTextWithEditorCommands(target, text) {
+    const prompt = String(text || '')
+    const doc = target?.ownerDocument || global.document
+    target.focus?.()
+    placeSelectionInEditable(target, true)
+    dispatchTextEvent(target, 'beforeinput', '', { inputType: 'deleteContentBackward' })
+    doc?.execCommand?.('delete', false)
+
+    placeSelectionInEditable(target, false)
+    dispatchPasteEvent(target, prompt)
+    dispatchTextEvent(target, 'beforeinput', prompt, { inputType: 'insertFromPaste' })
+    const inserted = Boolean(doc?.execCommand?.('insertText', false, prompt))
+    dispatchTextEvent(target, 'input', prompt, { inputType: 'insertFromPaste' })
+    dispatchTextEvent(target, 'change', prompt)
+    return inserted
+  }
+
+  function writePromptToSlateDomFallback(editor, text) {
     const prompt = String(text || '')
     const doc = editor.ownerDocument || global.document
-    editor.focus?.()
-    editor.click?.()
-
-    dispatchTextEvent(editor, 'beforeinput', '', { inputType: 'deleteContentBackward' })
-    dispatchPasteEvent(editor, prompt)
-
-    const paragraphs = prompt.split(/\n{2,}/).map(part => part.trim()).filter(Boolean)
     const fragment = doc.createDocumentFragment()
-    for (const paragraphText of paragraphs.length ? paragraphs : [prompt]) {
+    for (const paragraphText of splitSlateParagraphText(prompt)) {
       fragment.appendChild(createSlateParagraph(doc, paragraphText))
     }
 
@@ -254,11 +327,48 @@
       selection.removeAllRanges()
       selection.addRange(range)
     }
+    return {
+      ok: false,
+      visibleDom: textWasWritten(editor, prompt),
+      strategy: 'slate-dom-visible-only',
+      reason: 'flow-state-not-confirmed',
+    }
+  }
 
-    dispatchTextEvent(editor, 'beforeinput', prompt)
-    dispatchTextEvent(editor, 'input', prompt)
-    dispatchTextEvent(editor, 'change', prompt)
-    return { ok: textWasWritten(editor, prompt), strategy: 'slate-dom' }
+  function writePromptToSlateTarget(target, text) {
+    const editor = findSlateEditor(target)
+    if (!editor) return { ok: false, reason: 'missing-slate-editor' }
+    const prompt = String(text || '')
+    editor.focus?.()
+    editor.click?.()
+
+    if (insertTextWithEditorCommands(editor, prompt) && textWasWritten(editor, prompt)) {
+      return { ok: true, strategy: 'slate-insert-text' }
+    }
+
+    return writePromptToSlateDomFallback(editor, prompt)
+  }
+
+  async function writePromptToSlateTargetAsync(target, text) {
+    const editor = findSlateEditor(target)
+    if (!editor) return { ok: false, reason: 'missing-slate-editor' }
+    const prompt = String(text || '')
+    const doc = editor.ownerDocument || global.document
+    const win = doc.defaultView || global
+    editor.focus?.()
+    editor.click?.()
+
+    const clipboardReady = await writeClipboardText(win, prompt)
+    if (clipboardReady) {
+      clearEditableTarget(editor)
+      placeSelectionInEditable(editor, true)
+      if (doc?.execCommand?.('paste', false)) {
+        await wait(120)
+        if (textWasWritten(editor, prompt)) return { ok: true, strategy: 'slate-clipboard-paste' }
+      }
+    }
+
+    return writePromptToSlateTarget(editor, prompt)
   }
 
   function writePromptToTarget(target, text) {
@@ -268,8 +378,7 @@
     target.click?.()
 
     if (isSlateTarget(target)) {
-      const slateResult = writePromptToSlateTarget(target, prompt)
-      if (slateResult.ok) return slateResult
+      return writePromptToSlateTarget(target, prompt)
     }
 
     if ('value' in target) {
@@ -322,6 +431,12 @@
     return { ok: inserted && textWasWritten(target, prompt), strategy: inserted ? 'editable-insert' : 'editable-failed' }
   }
 
+  async function writePromptToTargetAsync(target, text) {
+    if (!target) return { ok: false, reason: 'missing-target' }
+    if (isSlateTarget(target)) return writePromptToSlateTargetAsync(target, text)
+    return writePromptToTarget(target, text)
+  }
+
   function submitPromptFromTarget(target) {
     if (!target) return false
     dispatchKeyboardEvent(target, 'keydown', 'Enter')
@@ -366,9 +481,12 @@
     escapeHtml,
     readTargetText,
     isSlateTarget,
+    splitSlateParagraphText,
     createSlateParagraph,
     writePromptToSlateTarget,
+    writePromptToSlateTargetAsync,
     writePromptToTarget,
+    writePromptToTargetAsync,
     submitPromptFromTarget,
   }
 

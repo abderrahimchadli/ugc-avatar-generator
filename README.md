@@ -12,6 +12,8 @@ Higgsfield account.
   sheets, product packshots, product style sheets, and avatar + product UGC.
 - Uses a Chrome extension as a browser bridge for Google Flow and ChatGPT.
 - Imports selected generated images back into the correct package session.
+- Links extension imports to the account that opened the generation session, so
+  saved images land in that user's package library.
 - Uploads selected package images to Higgsfield using the existing account
   connection.
 - Supports Supabase Auth approval when configured, and local demo mode when not.
@@ -40,6 +42,11 @@ ADMIN_EMAILS=your@email.com
 
 Run `src/api/schema.sql` in Supabase SQL editor before enabling real users.
 
+Vercel does not provide persistent server file storage by itself. For the free
+test setup, Vercel hosts the app and Supabase stores account, package, and
+package image records. A larger production setup should move image bytes to
+Supabase Storage, Vercel Blob, Cloudflare R2, or another bucket.
+
 No OpenAI or Gemini API key is required for this MVP. Generation happens in
 Google Flow or ChatGPT through the user's own logged-in browser account.
 
@@ -62,6 +69,7 @@ The extension:
 - detects large generated images in the active tab;
 - adds **Save to App** buttons;
 - imports the selected image into the active package.
+- preserves the import when the app asks the user to sign in first.
 
 ## Higgsfield upload
 
@@ -76,7 +84,7 @@ saves returned media URLs in the package metadata.
 
 ## Notes
 
-- `Remove from server` is intentionally disabled until a real image bucket such
-  as Supabase Storage, Cloudflare R2, or Vercel Blob is connected.
+- Library removes image records locally and from Supabase when Supabase is
+  configured. A real image bucket is still recommended for high-volume storage.
 - The extension is a user-controlled browser helper, not a private API scraper.
 - Google Flow and ChatGPT UI changes may require extension selector updates.

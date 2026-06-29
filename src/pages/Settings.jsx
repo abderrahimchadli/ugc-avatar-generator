@@ -7,8 +7,8 @@ import { formatBytes } from '../utils/promptPresets'
 
 export default function Settings() {
   const location = useLocation()
-  const { profile, hasSupabaseConfig, isApproved, isSuperUser } = useAuth()
-  const { storageStats } = usePackages()
+  const { profile, isApproved, isSuperUser } = useAuth()
+  const { storageStats, serverStatus, hasServerStorage } = usePackages()
   const [hfConnected, setHfConnected] = useState(isHFConnected)
   const [hfLoading, setHfLoading] = useState(false)
 
@@ -38,7 +38,7 @@ export default function Settings() {
           <div><strong>Active account</strong><span>{profile?.displayName || profile?.email || 'Not signed in'} · {profile?.email || 'no email'} · {isApproved ? 'approved' : 'pending'} {isSuperUser ? '· super user' : ''}</span></div>
         </div>
         <div className="settings-row">
-          <div><strong>Supabase</strong><span>{hasSupabaseConfig ? 'Configured for real auth and metadata' : 'Demo mode: local-only auth and packages'}</span></div>
+          <div><strong>Server storage</strong><span>{hasServerStorage ? `Supabase is configured · ${serverStatus.message}` : 'Vercel demo is local-only until Supabase or Vercel Blob is connected.'}</span></div>
         </div>
         <div className="settings-row">
           <div><strong>Chrome extension</strong><span>Install from the `extension/` folder and verify it from the Extension page.</span></div>
@@ -56,8 +56,8 @@ export default function Settings() {
           )}
         </div>
         <div className="settings-row">
-          <div><strong>Remove from server</strong><span>No server image bucket is connected yet. The MVP removes local/package records only.</span></div>
-          <button className="secondary-btn" disabled>Not available</button>
+          <div><strong>Remove images</strong><span>Use Library image remove buttons. When server storage is configured, the matching server item is deleted too.</span></div>
+          <a className="secondary-btn" href="/library">Open library</a>
         </div>
       </section>
     </main>
