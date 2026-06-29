@@ -85,7 +85,7 @@ export function PackageProvider({ children }) {
     ))
   }
 
-  function createGenerationSession({ packageId, mode, prompt, source }) {
+  function createGenerationSession({ packageId, mode, prompt, source, flowModel, imageModel }) {
     const pack = packages.find(p => p.id === packageId)
     const session = {
       id: uid('gen'),
@@ -97,6 +97,8 @@ export function PackageProvider({ children }) {
       prompt,
       promptHash: hashText(prompt),
       source,
+      flowModel: flowModel || null,
+      imageModel: imageModel || null,
       startedAt: Date.now(),
       status: 'active',
     }
@@ -156,4 +158,3 @@ export function usePackages() {
   if (!ctx) throw new Error('usePackages must be used inside PackageProvider')
   return ctx
 }
-

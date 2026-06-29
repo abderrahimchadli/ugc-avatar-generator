@@ -3,20 +3,30 @@
   top: 88px;
   right: 18px;
   z-index: 2147483647;
-  width: 230px;
-  padding: 12px;
-  border-radius: 12px;
-  background: rgba(18, 18, 24, 0.92);
+  width: 260px;
+  padding: 14px;
+  border: 1px solid rgba(255,255,255,0.1);
+  border-radius: 8px;
+  background: rgba(10, 12, 18, 0.92);
   color: white;
   font-family: Inter, Arial, sans-serif;
-  box-shadow: 0 12px 40px rgba(0,0,0,0.32);
-  backdrop-filter: blur(14px);
+  box-shadow: 0 20px 60px rgba(0,0,0,0.36);
+  backdrop-filter: blur(18px);
+}
+
+#ugc-bridge-panel .ugc-kicker {
+  color: #8da2bd;
+  font-size: 10px;
+  font-weight: 850;
+  text-transform: uppercase;
+  letter-spacing: 0;
+  margin-bottom: 5px;
 }
 
 #ugc-bridge-panel .ugc-title {
   font-weight: 800;
-  font-size: 14px;
-  margin-bottom: 4px;
+  font-size: 15px;
+  margin-bottom: 5px;
 }
 
 #ugc-bridge-panel .ugc-session {
@@ -24,6 +34,14 @@
   font-size: 12px;
   line-height: 1.35;
   margin-bottom: 10px;
+}
+
+#ugc-bridge-panel .ugc-status {
+  min-height: 14px;
+  color: rgba(255,255,255,0.58);
+  font-size: 11px;
+  line-height: 1.3;
+  margin-top: 8px;
 }
 
 #ugc-bridge-panel button,
@@ -40,7 +58,8 @@
 
 #ugc-bridge-panel button {
   width: 100%;
-  margin-top: 6px;
+  height: 36px;
+  margin-top: 7px;
 }
 
 .ugc-save-image {
@@ -50,4 +69,3 @@
   z-index: 2147483646;
   box-shadow: 0 6px 18px rgba(0,0,0,0.28);
 }
-

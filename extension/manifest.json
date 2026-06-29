@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "UGC Avatar Studio Bridge",
   "description": "Bridge prompts and generated images between Avatar Studio, Google Flow, ChatGPT, and Higgsfield packages.",
-  "version": "0.1.0",
+  "version": "0.2.1",
   "permissions": ["storage", "tabs", "activeTab", "scripting", "clipboardWrite"],
   "host_permissions": [
     "https://labs.google/*",
@@ -21,7 +21,7 @@
         "https://*.vercel.app/*",
         "http://localhost:5173/*"
       ],
-      "js": ["content.js"],
+      "js": ["bridgeCore.js", "content.js"],
       "css": ["content.css"],
       "run_at": "document_idle"
     }
@@ -31,4 +31,3 @@
     "default_popup": "popup.html"
   }
 }
-

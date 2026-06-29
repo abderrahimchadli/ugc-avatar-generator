@@ -1,3 +1,5 @@
+importScripts('bridgeCore.js')
+
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (message?.type === 'SAVE_ACTIVE_SESSION') {
     chrome.storage.local.set({ activeSession: message.session }, () => sendResponse({ ok: true }))
@@ -20,7 +22,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (message?.type === 'STORE_IMPORT') {
     const importId = `imp_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
     chrome.storage.local.set({ [`import:${importId}`]: message.payload }, () => {
-      const appUrl = message.payload?.appUrl || 'http://localhost:5173'
+      const appUrl = UGCBridgeCore.getImportAppUrl(message.payload)
       chrome.tabs.create({ url: `${appUrl}/extension-import?importId=${encodeURIComponent(importId)}` })
       sendResponse({ ok: true, importId })
     })
@@ -48,4 +50,3 @@ async function fetchAsDataUrl(url) {
     reader.readAsDataURL(blob)
   })
 }
-

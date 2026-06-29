@@ -2,9 +2,12 @@ import { useMemo, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { usePackages } from '../context/packageStore'
 import { AVATAR_MODES, PRODUCT_MODES, buildPrompt } from '../utils/promptPresets'
+import { getToolUrl } from '../utils/toolTargets'
 
-const FLOW_URL = 'https://labs.google/fx/tools/flow'
-const CHATGPT_URL = 'https://chatgpt.com/'
+const FLOW_MODELS = [
+  { id: 'nano_banana_pro', label: 'Nano Banana Pro' },
+  { id: 'nano_banana_2', label: 'Nano Banana 2' },
+]
 
 export default function PromptBuilder() {
   const [params] = useSearchParams()
@@ -14,17 +17,25 @@ export default function PromptBuilder() {
   const modes = pack?.type === 'product' ? PRODUCT_MODES : AVATAR_MODES
   const [mode, setMode] = useState(modes[0]?.id || 'main_portrait')
   const [style, setStyle] = useState('realistic')
+  const [flowModel, setFlowModel] = useState('nano_banana_pro')
   const [extra, setExtra] = useState('')
   const prompt = useMemo(() => buildPrompt({ pack, mode, style, extra }), [pack, mode, style, extra])
 
   function openTool(source) {
     if (!pack) return
-    const session = createGenerationSession({ packageId: pack.id, mode, prompt, source })
+    const session = createGenerationSession({
+      packageId: pack.id,
+      mode,
+      prompt,
+      source,
+      flowModel: source === 'google-flow' ? flowModel : null,
+      imageModel: source === 'google-flow' ? flowModel : 'chatgpt-image-2',
+    })
     const payload = { type: 'UGC_STUDIO_SESSION', session }
     localStorage.setItem('ugc_active_generation_session', JSON.stringify(session))
     window.postMessage(payload, window.location.origin)
     navigator.clipboard?.writeText(prompt).catch(() => {})
-    window.open(source === 'google-flow' ? FLOW_URL : CHATGPT_URL, '_blank', 'noopener,noreferrer')
+    window.open(getToolUrl(source), '_blank', 'noopener,noreferrer')
   }
 
   return (
@@ -55,6 +66,11 @@ export default function PromptBuilder() {
               <option value="product">Product commercial</option>
             </select>
           </label>
+          <label>Google Flow model
+            <select value={flowModel} onChange={e => setFlowModel(e.target.value)}>
+              {FLOW_MODELS.map(model => <option key={model.id} value={model.id}>{model.label}</option>)}
+            </select>
+          </label>
           <label>Extra direction
             <textarea value={extra} onChange={e => setExtra(e.target.value)} placeholder="Scene, outfit, product use, camera feel..." />
           </label>
@@ -71,4 +87,3 @@ export default function PromptBuilder() {
     </main>
   )
 }
-

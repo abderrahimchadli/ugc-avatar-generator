@@ -1,6 +1,3 @@
-const APP_HOST_RE = /^(localhost:5173|.*\.vercel\.app)$/
-const FLOW_HOST_RE = /labs\.google$/
-const CHATGPT_HOST_RE = /chatgpt\.com$/
 const seen = new WeakSet()
 let activeSession = null
 
@@ -37,66 +34,243 @@ function init() {
 }
 
 function isAppPage() {
-  return APP_HOST_RE.test(location.host)
+  return UGCBridgeCore.isAppHost(location.host)
 }
 
 function isToolPage() {
-  return FLOW_HOST_RE.test(location.host) || CHATGPT_HOST_RE.test(location.host)
+  return UGCBridgeCore.isToolHost(location.host)
 }
 
 function mountToolPanel() {
   if (document.getElementById('ugc-bridge-panel')) return
   const panel = document.createElement('div')
   panel.id = 'ugc-bridge-panel'
+  const sessionText = UGCBridgeCore.formatSession(activeSession)
+  const flowModelLabel = UGCBridgeCore.getPreferredFlowModelLabels(activeSession)[0]
+  const flowControls = UGCBridgeCore.isFlowHost(location.host)
+    ? `<button id="ugc-select-flow-model">Set ${UGCBridgeCore.escapeHtml(flowModelLabel)}</button>`
+    : ''
   panel.innerHTML = `
-    <div class="ugc-title">UGC Bridge</div>
-    <div class="ugc-session">${activeSession ? `Saving to ${escapeHtml(activeSession.packageName)}` : 'No active package session'}</div>
+    <div class="ugc-kicker">Avatar Studio</div>
+    <div class="ugc-title">${UGCBridgeCore.escapeHtml(sessionText.title)}</div>
+    <div class="ugc-session">${UGCBridgeCore.escapeHtml(sessionText.body)}</div>
+    ${flowControls}
     <button id="ugc-fill-prompt">Paste prompt</button>
     <button id="ugc-click-generate">Click generate</button>
     <button id="ugc-scan-images">Scan images</button>
+    <div class="ugc-status" id="ugc-bridge-status"></div>
   `
   document.body.appendChild(panel)
+  panel.querySelector('#ugc-select-flow-model')?.addEventListener('click', selectPreferredFlowModel)
   panel.querySelector('#ugc-fill-prompt').addEventListener('click', fillPrompt)
   panel.querySelector('#ugc-click-generate').addEventListener('click', clickGenerate)
   panel.querySelector('#ugc-scan-images').addEventListener('click', scanImages)
 }
 
-function fillPrompt() {
+async function fillPrompt() {
   if (!activeSession?.prompt) return alert('Open a package prompt from the Avatar Studio app first.')
+  if (UGCBridgeCore.isFlowHost(location.host)) await selectPreferredFlowModel()
   const target = findPromptTarget()
   if (!target) {
     navigator.clipboard?.writeText(activeSession.prompt)
     return alert('Prompt copied. Paste it into the prompt box manually.')
   }
-  target.focus()
-  if ('value' in target) {
-    target.value = activeSession.prompt
-    target.dispatchEvent(new Event('input', { bubbles: true }))
-  } else {
-    target.textContent = activeSession.prompt
-    target.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText', data: activeSession.prompt }))
+  const result = UGCBridgeCore.writePromptToTarget(target, activeSession.prompt)
+  if (!result.ok) {
+    navigator.clipboard?.writeText(activeSession.prompt)
+    setStatus('Prompt copied. Paste manually if Flow still says it is empty.')
+    return
   }
+  setStatus('Prompt pasted into the active editor.')
 }
 
 function findPromptTarget() {
   const selectors = [
-    'textarea',
+    '[aria-label*="prompt" i]',
+    '[placeholder*="prompt" i]',
+    '[data-testid*="prompt" i]',
+    'textarea:not([readonly]):not([disabled])',
+    'input[type="text"]:not([readonly]):not([disabled])',
     '[contenteditable="true"]',
     '[role="textbox"]',
     '.ProseMirror',
   ]
-  for (const selector of selectors) {
-    const all = [...document.querySelectorAll(selector)].filter(el => isVisible(el))
-    if (all.length) return all.sort((a, b) => area(b) - area(a))[0]
+  const candidates = selectors.flatMap(selector => queryDeep(document, selector))
+    .filter(el => isVisible(el) && !el.closest?.('#ugc-bridge-panel'))
+  if (candidates.length) {
+    return candidates.sort((a, b) => promptTargetScore(b) - promptTargetScore(a))[0]
   }
   return null
 }
 
-function clickGenerate() {
-  const buttons = [...document.querySelectorAll('button,[role="button"]')].filter(isVisible)
-  const target = buttons.find(btn => /generate|create|submit|send|arrow_forward|start/i.test(btn.textContent || btn.ariaLabel || ''))
-  if (target) target.click()
-  else alert('Could not find a generate button. Click it manually, then use Save to App on the result.')
+function promptTargetScore(el) {
+  const text = [
+    el.getAttribute?.('aria-label'),
+    el.getAttribute?.('placeholder'),
+    el.getAttribute?.('data-testid'),
+    el.id,
+    el.className,
+  ].join(' ')
+  let score = area(el)
+  if (/prompt/i.test(text)) score += 100000
+  if (/search|filter|model/i.test(text)) score -= 50000
+  if (String(el.tagName).toLowerCase() === 'textarea') score += 25000
+  if (el.getAttribute?.('contenteditable') === 'true') score += 15000
+  return score
+}
+
+async function selectPreferredFlowModel() {
+  if (!UGCBridgeCore.isFlowHost(location.host)) return false
+  const labels = UGCBridgeCore.getPreferredFlowModelLabels(activeSession)
+  const openOption = findOpenModelOption(labels)
+  if (openOption) {
+    openOption.click()
+    setStatus(`Selected ${labels[0]}.`)
+    return true
+  }
+
+  if (currentModelLooksSelected(labels)) {
+    setStatus(`${labels[0]} is already selected.`)
+    return true
+  }
+
+  const trigger = findModelMenuTrigger()
+  if (!trigger) {
+    setStatus(`Could not find the Flow model menu. Select ${labels[0]} manually.`)
+    return false
+  }
+
+  trigger.click()
+  await wait(450)
+  const option = findOpenModelOption(labels) || findClickableByLabels(labels)
+  if (!option) {
+    setStatus(`Could not find ${labels[0]} in the open model menu.`)
+    return false
+  }
+  option.click()
+  setStatus(`Selected ${labels[0]}.`)
+  return true
+}
+
+function currentModelLooksSelected(labels) {
+  const controls = queryDeep(document, 'button,[role="button"],[aria-haspopup="menu"],[aria-haspopup="listbox"]')
+    .filter(el => isVisible(el) && !el.closest?.('#ugc-bridge-panel'))
+  return controls.some(el => UGCBridgeCore.textMatchesAnyLabel(getVisibleText(el), labels))
+}
+
+function findOpenModelOption(labels) {
+  const options = queryDeep(document, '[role="option"],[role="menuitem"],[aria-selected],li')
+    .filter(el => isVisible(el) && !el.closest?.('#ugc-bridge-panel'))
+    .filter(el => UGCBridgeCore.textMatchesAnyLabel(getVisibleText(el), labels))
+  return options.sort((a, b) => area(a) - area(b))[0] || null
+}
+
+function findClickableByLabels(labels) {
+  const clickable = queryDeep(document, 'button,[role="button"],[role="option"],[role="menuitem"],li,div')
+    .filter(el => isVisible(el) && !el.closest?.('#ugc-bridge-panel'))
+    .filter(el => UGCBridgeCore.textMatchesAnyLabel(getVisibleText(el), labels))
+  return clickable.sort((a, b) => area(a) - area(b))[0] || null
+}
+
+function findModelMenuTrigger() {
+  const candidates = queryDeep(document, 'button,[role="button"],[aria-haspopup="menu"],[aria-haspopup="listbox"]')
+    .filter(el => isVisible(el) && !el.closest?.('#ugc-bridge-panel'))
+    .filter(el => /model|nano|banana|imagen|image|veo/i.test(getVisibleText(el)))
+  return candidates.sort((a, b) => area(a) - area(b))[0] || null
+}
+
+function queryDeep(root, selector) {
+  const found = []
+  try {
+    if (root.querySelectorAll) found.push(...root.querySelectorAll(selector))
+  } catch {
+    return found
+  }
+  const nodes = root.querySelectorAll ? [...root.querySelectorAll('*')] : []
+  for (const node of nodes) {
+    if (node.shadowRoot) found.push(...queryDeep(node.shadowRoot, selector))
+  }
+  return [...new Set(found)]
+}
+
+function getVisibleText(el) {
+  return [
+    el.innerText,
+    el.textContent,
+    el.getAttribute?.('aria-label'),
+    el.getAttribute?.('title'),
+    el.getAttribute?.('data-testid'),
+  ].join(' ')
+}
+
+function setStatus(message) {
+  const status = document.getElementById('ugc-bridge-status')
+  if (status) status.textContent = message || ''
+}
+
+function wait(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms))
+}
+
+async function clickGenerate() {
+  await wait(250)
+  const target = findGenerateButton()
+  if (target) {
+    target.click()
+    setStatus('Clicked the generate button.')
+    return
+  }
+
+  const promptTarget = findPromptTarget()
+  if (UGCBridgeCore.submitPromptFromTarget(promptTarget)) {
+    setStatus('Submitted from the prompt editor.')
+    return
+  }
+
+  alert('Could not find a generate button. Click it manually, then use Save to App on the result.')
+}
+
+function findGenerateButton() {
+  const directSelectors = [
+    'button[type="submit"]',
+    'button[aria-label*="generate" i]',
+    'button[aria-label*="create" i]',
+    'button[aria-label*="send" i]',
+    '[role="button"][aria-label*="generate" i]',
+    '[role="button"][aria-label*="send" i]',
+    '[data-testid*="generate" i]',
+    '[data-testid*="send" i]',
+    '[data-testid*="submit" i]',
+  ]
+  for (const selector of directSelectors) {
+    const match = queryDeep(document, selector)
+      .filter(isClickableAction)
+      .sort((a, b) => generateButtonScore(b) - generateButtonScore(a))[0]
+    if (match) return match
+  }
+
+  const buttons = queryDeep(document, 'button,[role="button"]')
+    .filter(isClickableAction)
+    .sort((a, b) => generateButtonScore(b) - generateButtonScore(a))
+  return buttons[0] || null
+}
+
+function isClickableAction(el) {
+  if (!isVisible(el) || el.closest?.('#ugc-bridge-panel')) return false
+  if (el.disabled || el.getAttribute?.('aria-disabled') === 'true') return false
+  return generateButtonScore(el) > 0
+}
+
+function generateButtonScore(el) {
+  const text = getVisibleText(el)
+  let score = 0
+  if (/generate|create|submit|send|start/i.test(text)) score += 100
+  if (/arrow|send|submit|generate/i.test(text)) score += 30
+  if (String(el.tagName).toLowerCase() === 'button') score += 15
+  if (el.getAttribute?.('type') === 'submit') score += 25
+  if (/cancel|stop|close|menu|model|settings|help|upgrade/i.test(text)) score -= 100
+  score -= Math.min(area(el) / 10000, 30)
+  return score
 }
 
 function scanImages() {
@@ -104,7 +278,13 @@ function scanImages() {
   const imgs = [...document.querySelectorAll('img')].filter(img => {
     if (seen.has(img) || !isVisible(img)) return false
     const box = img.getBoundingClientRect()
-    return box.width >= 220 && box.height >= 220 && !/avatar|logo|icon/i.test(img.alt || '')
+    return UGCBridgeCore.isLikelyGeneratedImage({
+      width: box.width,
+      height: box.height,
+      alt: img.alt || '',
+      src: img.currentSrc || img.src || '',
+      visible: true,
+    })
   })
   imgs.forEach(addSaveButton)
 }
@@ -144,7 +324,7 @@ async function saveImage(img) {
       packageName: activeSession.packageName,
       mode: activeSession.mode,
       prompt: activeSession.prompt,
-      source: location.host.includes('chatgpt') ? 'chatgpt-image' : 'google-flow',
+      source: UGCBridgeCore.sourceForHost(location.host),
       dataUrl,
       label: `Imported from ${location.host}`,
     },
@@ -170,8 +350,4 @@ function isVisible(el) {
 function area(el) {
   const box = el.getBoundingClientRect()
   return box.width * box.height
-}
-
-function escapeHtml(str) {
-  return String(str || '').replace(/[&<>"']/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' }[ch]))
 }
