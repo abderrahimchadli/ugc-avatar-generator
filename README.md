@@ -76,11 +76,13 @@ The extension:
 Connect Higgsfield in Settings, then open Library and click:
 
 ```text
-Upload package to Higgsfield
+Prepare Higgsfield references
 ```
 
 The app uploads images with Higgsfield `media_upload` and `media_confirm`, then
-saves returned media URLs in the package metadata.
+saves returned reference media URLs/IDs in the package metadata. These references
+are prepared for use in generation workflows; Higgsfield may not show them as
+visible assets inside the Higgsfield website library.
 
 ## Notes
 

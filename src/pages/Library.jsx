@@ -1,5 +1,5 @@
 import { isHFConnected } from '../utils/higgsfieldAuth'
-import { uploadPackageToHiggsfield } from '../utils/higgsfieldPackageUpload'
+import { HIGGSFIELD_REFERENCE_NOTE, uploadPackageToHiggsfield } from '../utils/higgsfieldPackageUpload'
 import { usePackages } from '../context/packageStore'
 import { formatBytes } from '../utils/promptPresets'
 import { useMemo, useState } from 'react'
@@ -9,6 +9,10 @@ import {
   packageUpdatedAt,
   sortPackagesForLibrary,
 } from '../utils/libraryView'
+
+function isHttpUrl(value) {
+  return /^https?:\/\//i.test(String(value || ''))
+}
 
 export default function Library() {
   const { packages, updatePackage, removePackageItem, storageStats, serverStatus, hasServerStorage } = usePackages()
@@ -32,11 +36,15 @@ export default function Library() {
     setUploading(pack.id)
     try {
       const results = await uploadPackageToHiggsfield(pack)
+      if (!results.length) {
+        setMessage('No new images to prepare. Existing HF ref badges are already saved in this package.')
+        return
+      }
       const byId = Object.fromEntries(results.map(r => [r.itemId, r.higgsfield]))
       updatePackage(pack.id, {
         items: (pack.items || []).map(item => byId[item.id] ? { ...item, higgsfield: byId[item.id] } : item),
       })
-      setMessage(`Uploaded ${results.length} images to Higgsfield.`)
+      setMessage(`Prepared ${results.length} Higgsfield reference image${results.length === 1 ? '' : 's'}. These are usable as references, but may not appear in Higgsfield's website library.`)
     } catch (e) {
       setMessage(e.message)
     } finally {
@@ -100,17 +108,24 @@ export default function Library() {
               <span className="storage-pill compact">{packageImageCount(pack)}</span>
             </div>
             <p className="muted">Updated {new Date(packageUpdatedAt(pack)).toLocaleString()}</p>
+            {(pack.items || []).some(item => item.higgsfield?.url) && (
+              <p className="muted hf-note">{HIGGSFIELD_REFERENCE_NOTE}</p>
+            )}
             <div className="thumb-grid">
               {(pack.items || []).slice(0, 8).map(item => (
                 <div className="thumb" key={item.id}>
                   <img src={item.url} alt={item.label} />
-                  {item.higgsfield?.url && <span className="uploaded">HF</span>}
+                  {item.higgsfield?.url && (
+                    isHttpUrl(item.higgsfield.url)
+                      ? <a className="uploaded" href={item.higgsfield.url} target="_blank" rel="noreferrer" title="Open Higgsfield reference media">HF ref</a>
+                      : <span className="uploaded" title={`Higgsfield media ID: ${item.higgsfield.url}`}>HF ref</span>
+                  )}
                   <button type="button" title="Remove image" onClick={() => removePackageItem(pack.id, item.id)}>Remove</button>
                 </div>
               ))}
             </div>
             <button className="primary-btn full" onClick={() => upload(pack)} disabled={uploading === pack.id || !(pack.items || []).length}>
-              {uploading === pack.id ? 'Uploading…' : 'Upload package to Higgsfield'}
+              {uploading === pack.id ? 'Preparing…' : 'Prepare Higgsfield references'}
             </button>
           </article>
         ))}

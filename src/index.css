@@ -532,6 +532,15 @@ textarea {
   background: #10B981;
 }
 
+.thumb a.uploaded {
+  text-decoration: none;
+}
+
+.hf-note {
+  margin-top: 8px;
+  font-size: 12px;
+}
+
 .builder-grid {
   display: grid;
   grid-template-columns: minmax(280px, 0.75fr) minmax(0, 1.25fr);
