@@ -10,6 +10,7 @@ export default function Nav() {
     { to: '/products', label: 'Products' },
     { to: '/prompt-builder', label: 'Prompt' },
     { to: '/library', label: 'Library' },
+    { to: '/extension', label: 'Extension' },
     ...(isSuperUser ? [{ to: '/users', label: 'Users' }] : []),
   ] : []
 
@@ -36,4 +37,3 @@ export default function Nav() {
     </nav>
   )
 }
-

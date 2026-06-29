@@ -41,7 +41,8 @@ export default function Settings() {
           <div><strong>Supabase</strong><span>{hasSupabaseConfig ? 'Configured for real auth and metadata' : 'Demo mode: local-only auth and packages'}</span></div>
         </div>
         <div className="settings-row">
-          <div><strong>Chrome extension</strong><span>Install from the `extension/` folder and pin it in Chrome.</span></div>
+          <div><strong>Chrome extension</strong><span>Install from the `extension/` folder and verify it from the Extension page.</span></div>
+          <a className="secondary-btn" href="/extension">Install</a>
         </div>
         <div className="settings-row">
           <div><strong>Storage estimate</strong><span>{storageStats.packages} packages · {storageStats.images} images · {formatBytes(storageStats.usedBytes)}</span></div>
@@ -62,4 +63,3 @@ export default function Settings() {
     </main>
   )
 }
-

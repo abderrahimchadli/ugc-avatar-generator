@@ -19,6 +19,9 @@ function init() {
       activeSession = { ...event.data.session, appUrl: window.location.origin, tabBoundAt: Date.now() }
       chrome.runtime.sendMessage({ type: 'SAVE_ACTIVE_SESSION', session: activeSession })
     }
+    if (event.data?.type === 'UGC_STUDIO_PING' && isAppPage()) {
+      window.postMessage({ type: 'UGC_STUDIO_PONG' }, window.location.origin)
+    }
     if (event.data?.type === 'UGC_STUDIO_REQUEST_IMPORT') {
       chrome.runtime.sendMessage({ type: 'GET_IMPORT', importId: event.data.importId }, res => {
         if (res?.payload) window.postMessage({ type: 'UGC_STUDIO_IMPORT_IMAGE', payload: res.payload }, window.location.origin)
@@ -172,4 +175,3 @@ function area(el) {
 function escapeHtml(str) {
   return String(str || '').replace(/[&<>"']/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' }[ch]))
 }
-

@@ -16,6 +16,7 @@ import Settings from './pages/Settings'
 import AuthCallback from './pages/AuthCallback'
 import ExtensionImport from './pages/ExtensionImport'
 import AdminUsers from './pages/AdminUsers'
+import ExtensionSetup from './pages/ExtensionSetup'
 
 function RequireApproved({ children }) {
   const { loading, profile, isApproved } = useAuth()
@@ -37,6 +38,7 @@ function AppRoutes() {
         <Route path="/products" element={<RequireApproved><Packages type="product" /></RequireApproved>} />
         <Route path="/prompt-builder" element={<RequireApproved><PromptBuilder /></RequireApproved>} />
         <Route path="/library" element={<RequireApproved><Library /></RequireApproved>} />
+        <Route path="/extension" element={<RequireApproved><ExtensionSetup /></RequireApproved>} />
         <Route path="/users" element={<RequireApproved><AdminUsers /></RequireApproved>} />
         <Route path="/settings" element={<Settings />} />
         <Route path="/extension-import" element={<RequireApproved><ExtensionImport /></RequireApproved>} />
@@ -70,4 +72,3 @@ export default function App() {
     </ThemeProvider>
   )
 }
-
