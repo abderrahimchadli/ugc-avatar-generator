@@ -12,10 +12,10 @@ export default function Home() {
       <section className="hero-panel">
         <div>
           <p className="eyebrow">Avatar and product reference studio</p>
-          <h1>Build named packages, generate in Flow or ChatGPT, then upload to Higgsfield.</h1>
+          <h1>Build named packages, generate in Flow or ChatGPT, then create Higgsfield assets.</h1>
           <p className="hero-copy">
             Create reusable avatar and product packs with locked prompts, style sheets,
-            extension-assisted imports, and user-controlled Higgsfield reference uploads.
+            extension-assisted imports, and user-controlled Higgsfield Marketing Studio assets.
           </p>
           <div className="hero-actions">
             <Link className="primary-btn" to={isApproved ? '/prompt-builder' : '/login'}>Start package</Link>

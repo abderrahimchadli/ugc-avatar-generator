@@ -48,7 +48,7 @@ export default function Settings() {
           <div><strong>Storage estimate</strong><span>{storageStats.packages} packages · {storageStats.images} images · {formatBytes(storageStats.usedBytes)}</span></div>
         </div>
         <div className="settings-row">
-          <div><strong>Higgsfield</strong><span>{hfConnected ? 'Connected for package upload' : 'Not connected'}</span></div>
+          <div><strong>Higgsfield</strong><span>{hfConnected ? 'Connected for Marketing Studio assets' : 'Not connected'}</span></div>
           {hfConnected ? (
             <button className="danger-btn" onClick={() => { disconnectHF(); setHfConnected(false) }}>Disconnect</button>
           ) : (

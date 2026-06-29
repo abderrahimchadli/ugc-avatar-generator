@@ -80,7 +80,7 @@ export default function ExtensionSetup() {
             <div><strong>3. Save to app</strong><span>Click Save to App on the generated image to import it into the right package.</span></div>
           </div>
           <div className="settings-row">
-            <div><strong>4. Upload to Higgsfield</strong><span>Review in Library, then upload selected packages when you want.</span></div>
+            <div><strong>4. Create Higgsfield asset</strong><span>Review in Library, then create a Marketing Studio avatar or product asset when you want.</span></div>
           </div>
           <p className="notice">
             {detected
