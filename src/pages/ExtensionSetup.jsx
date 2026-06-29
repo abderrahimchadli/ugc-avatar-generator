@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 
 const REPO_URL = 'https://github.com/abderrahimchadli/ugc-avatar-generator'
+const EXTENSION_ZIP = '/downloads/ugc-avatar-studio-extension.zip'
 
 export default function ExtensionSetup() {
   const [detected, setDetected] = useState(false)
@@ -44,12 +45,16 @@ export default function ExtensionSetup() {
 
       <section className="panel builder-grid">
         <div className="stack">
-          <h2>Install locally</h2>
+          <h2>Download and install locally</h2>
+          <a className="primary-btn full" href={EXTENSION_ZIP} download>
+            Download extension ZIP
+          </a>
           <ol className="steps-list">
+            <li>Download the extension ZIP and unzip it on the computer.</li>
             <li>Open Chrome and go to <strong>chrome://extensions</strong>.</li>
             <li>Turn on <strong>Developer mode</strong>.</li>
             <li>Click <strong>Load unpacked</strong>.</li>
-            <li>Select the <strong>extension</strong> folder from this project.</li>
+            <li>Select the unzipped <strong>extension</strong> folder.</li>
             <li>Pin <strong>UGC Avatar Studio Bridge</strong> in Chrome.</li>
           </ol>
           <div className="row-actions">
@@ -88,4 +93,3 @@ export default function ExtensionSetup() {
     </main>
   )
 }
-

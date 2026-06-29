@@ -45,11 +45,14 @@ Google Flow or ChatGPT through the user's own logged-in browser account.
 
 ## Chrome extension
 
-1. Open Chrome `chrome://extensions`.
-2. Enable Developer Mode.
-3. Click **Load unpacked**.
-4. Select the `extension/` folder.
-5. Open the app, create/select a package, and click **Open in Google Flow** or
+1. Download `public/downloads/ugc-avatar-studio-extension.zip` from the app's
+   Extension page.
+2. Unzip it on the local computer.
+3. Open Chrome `chrome://extensions`.
+4. Enable Developer Mode.
+5. Click **Load unpacked**.
+6. Select the unzipped `extension/` folder.
+7. Open the app, create/select a package, and click **Open in Google Flow** or
    **Open in ChatGPT** from Prompt Builder.
 
 The extension:
@@ -77,4 +80,3 @@ saves returned media URLs in the package metadata.
   as Supabase Storage, Cloudflare R2, or Vercel Blob is connected.
 - The extension is a user-controlled browser helper, not a private API scraper.
 - Google Flow and ChatGPT UI changes may require extension selector updates.
-
