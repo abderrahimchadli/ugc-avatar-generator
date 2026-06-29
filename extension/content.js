@@ -86,6 +86,9 @@ async function fillPrompt() {
 
 function findPromptTarget() {
   const selectors = [
+    '[data-slate-editor="true"]',
+    '[data-slate-string="true"]',
+    '[data-slate-node="element"]',
     '[aria-label*="prompt" i]',
     '[placeholder*="prompt" i]',
     '[data-testid*="prompt" i]',
@@ -113,6 +116,8 @@ function promptTargetScore(el) {
   ].join(' ')
   let score = area(el)
   if (/prompt/i.test(text)) score += 100000
+  if (el.matches?.('[data-slate-editor="true"]')) score += 150000
+  if (el.matches?.('[data-slate-string="true"],[data-slate-node="element"]')) score += 90000
   if (/search|filter|model/i.test(text)) score -= 50000
   if (String(el.tagName).toLowerCase() === 'textarea') score += 25000
   if (el.getAttribute?.('contenteditable') === 'true') score += 15000

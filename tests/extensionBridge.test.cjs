@@ -118,6 +118,129 @@ test('writes prompt into contenteditable targets with insertText fallback', () =
   assert.deepEqual(target.events, ['beforeinput', 'beforeinput', 'input', 'change'])
 })
 
+test('writes Flow prompts into the Slate paragraph string structure', () => {
+  class FakeEvent {
+    constructor(type, options = {}) {
+      this.type = type
+      Object.assign(this, options)
+    }
+  }
+  class FakeElement {
+    constructor(tagName, ownerDocument) {
+      this.tagName = tagName.toUpperCase()
+      this.ownerDocument = ownerDocument
+      this.attributes = {}
+      this.children = []
+      this.events = []
+      this._textContent = ''
+    }
+    setAttribute(name, value) {
+      this.attributes[name] = String(value)
+    }
+    getAttribute(name) {
+      return this.attributes[name] || null
+    }
+    appendChild(child) {
+      this.children.push(child)
+      return child
+    }
+    replaceChildren(...children) {
+      this.children = children.flatMap(child => child.isFragment ? child.children : [child])
+    }
+    querySelector(selector) {
+      return findInTree(this, node => node.matches?.(selector))
+    }
+    matches(selector) {
+      return selector.split(',').some(part => {
+        const attr = part.trim().match(/^\[([^=\]]+)(?:="([^"]+)")?\]$/)
+        if (!attr) return false
+        const [, name, value] = attr
+        return value ? this.attributes[name] === value : Object.hasOwn(this.attributes, name)
+      })
+    }
+    focus() {
+      this.focused = true
+    }
+    click() {
+      this.clicked = true
+    }
+    dispatchEvent(event) {
+      this.events.push(event.type)
+      return true
+    }
+    get textContent() {
+      return this._textContent || this.children.map(child => child.textContent || '').join('')
+    }
+    set textContent(value) {
+      this._textContent = String(value)
+      this.children = []
+    }
+    get innerText() {
+      return this.textContent
+    }
+    get firstChild() {
+      return this.children[0] || null
+    }
+  }
+  class FakeFragment {
+    constructor() {
+      this.isFragment = true
+      this.children = []
+    }
+    appendChild(child) {
+      this.children.push(child)
+      return child
+    }
+  }
+  class FakeDocument {
+    constructor() {
+      this.defaultView = { Event: FakeEvent, InputEvent: FakeEvent }
+    }
+    createElement(tagName) {
+      return new FakeElement(tagName, this)
+    }
+    createDocumentFragment() {
+      return new FakeFragment()
+    }
+    getSelection() {
+      return null
+    }
+    createRange() {
+      return null
+    }
+  }
+  function findInTree(node, predicate) {
+    if (predicate(node)) return node
+    for (const child of node.children || []) {
+      const found = findInTree(child, predicate)
+      if (found) return found
+    }
+    return null
+  }
+
+  const doc = new FakeDocument()
+  const editor = doc.createElement('div')
+  editor.setAttribute('data-slate-editor', 'true')
+  editor.setAttribute('contenteditable', 'true')
+
+  const result = core.writePromptToTarget(editor, 'Flow Slate prompt')
+  assert.equal(result.ok, true)
+  assert.equal(result.strategy, 'slate-dom')
+  assert.equal(editor.children.length, 1)
+
+  const paragraph = editor.children[0]
+  const textNode = paragraph.children[0]
+  const leaf = textNode.children[0]
+  const string = leaf.children[0]
+  assert.equal(paragraph.tagName, 'P')
+  assert.equal(paragraph.getAttribute('data-slate-node'), 'element')
+  assert.equal(textNode.getAttribute('data-slate-node'), 'text')
+  assert.equal(leaf.getAttribute('data-slate-leaf'), 'true')
+  assert.equal(string.getAttribute('data-slate-string'), 'true')
+  assert.equal(string.textContent, 'Flow Slate prompt')
+  assert.deepEqual(editor.events, ['beforeinput', 'beforeinput', 'input', 'change'])
+})
+
 test('submits a prompt through the nearest form when no generate button is found', () => {
   const form = {
     submitted: false,

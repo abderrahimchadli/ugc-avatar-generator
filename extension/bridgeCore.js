@@ -127,6 +127,21 @@
     return actual === expected || actual.includes(expected.slice(0, Math.min(expected.length, 60)))
   }
 
+  function isSlateTarget(target) {
+    if (!target) return false
+    if (target.matches?.('[data-slate-editor="true"],[data-slate-node],[data-slate-string]')) return true
+    return Boolean(target.querySelector?.('[data-slate-editor="true"],[data-slate-node],[data-slate-string]'))
+  }
+
+  function findSlateEditor(target) {
+    if (!target) return null
+    if (target.matches?.('[data-slate-editor="true"]')) return target
+    return target.closest?.('[data-slate-editor="true"]')
+      || target.querySelector?.('[data-slate-editor="true"]')
+      || target.closest?.('[contenteditable="true"]')
+      || target
+  }
+
   function dispatchTextEvent(target, type, text, options = {}) {
     const win = target?.ownerDocument?.defaultView || global
     const EventCtor = type === 'input' || type === 'beforeinput'
@@ -192,11 +207,70 @@
     else target.value = text
   }
 
+  function createSlateParagraph(doc, text) {
+    const paragraph = doc.createElement('p')
+    paragraph.setAttribute('data-slate-node', 'element')
+
+    const textNodeSpan = doc.createElement('span')
+    textNodeSpan.setAttribute('data-slate-node', 'text')
+
+    const leaf = doc.createElement('span')
+    leaf.setAttribute('data-slate-leaf', 'true')
+
+    const string = doc.createElement('span')
+    string.setAttribute('data-slate-string', 'true')
+    string.textContent = text
+
+    leaf.appendChild(string)
+    textNodeSpan.appendChild(leaf)
+    paragraph.appendChild(textNodeSpan)
+    return paragraph
+  }
+
+  function writePromptToSlateTarget(target, text) {
+    const editor = findSlateEditor(target)
+    if (!editor) return { ok: false, reason: 'missing-slate-editor' }
+    const prompt = String(text || '')
+    const doc = editor.ownerDocument || global.document
+    editor.focus?.()
+    editor.click?.()
+
+    dispatchTextEvent(editor, 'beforeinput', '', { inputType: 'deleteContentBackward' })
+    dispatchPasteEvent(editor, prompt)
+
+    const paragraphs = prompt.split(/\n{2,}/).map(part => part.trim()).filter(Boolean)
+    const fragment = doc.createDocumentFragment()
+    for (const paragraphText of paragraphs.length ? paragraphs : [prompt]) {
+      fragment.appendChild(createSlateParagraph(doc, paragraphText))
+    }
+
+    editor.replaceChildren(fragment)
+    const stringTarget = editor.querySelector?.('[data-slate-string="true"]') || editor
+    const selection = doc.getSelection?.()
+    const range = doc.createRange?.()
+    if (selection && range && stringTarget.firstChild) {
+      range.setStart(stringTarget.firstChild, String(stringTarget.textContent || '').length)
+      range.collapse(true)
+      selection.removeAllRanges()
+      selection.addRange(range)
+    }
+
+    dispatchTextEvent(editor, 'beforeinput', prompt)
+    dispatchTextEvent(editor, 'input', prompt)
+    dispatchTextEvent(editor, 'change', prompt)
+    return { ok: textWasWritten(editor, prompt), strategy: 'slate-dom' }
+  }
+
   function writePromptToTarget(target, text) {
     if (!target) return { ok: false, reason: 'missing-target' }
     const prompt = String(text || '')
     target.focus?.()
     target.click?.()
+
+    if (isSlateTarget(target)) {
+      const slateResult = writePromptToSlateTarget(target, prompt)
+      if (slateResult.ok) return slateResult
+    }
 
     if ('value' in target) {
       setNativeValue(target, '')
@@ -291,6 +365,9 @@
     formatSession,
     escapeHtml,
     readTargetText,
+    isSlateTarget,
+    createSlateParagraph,
+    writePromptToSlateTarget,
     writePromptToTarget,
     submitPromptFromTarget,
   }
