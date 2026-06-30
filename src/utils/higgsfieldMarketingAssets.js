@@ -29,10 +29,39 @@ function parseResponseText(text) {
   try { return JSON.parse(text) } catch { return text }
 }
 
+function formatApiErrorValue(value) {
+  if (value == null || value === '') return ''
+  if (typeof value === 'string') return value
+  if (typeof value === 'number' || typeof value === 'boolean') return String(value)
+  if (Array.isArray(value)) return value.map(formatApiErrorValue).filter(Boolean).join('; ')
+  if (typeof value !== 'object') return String(value)
+
+  const loc = Array.isArray(value.loc)
+    ? value.loc.join('.')
+    : value.field || value.path || value.param || value.parameter || ''
+  const msg = value.msg || value.message || value.reason || value.error_description
+    || (typeof value.error === 'string' ? value.error : '')
+  if (msg) return loc ? `${loc}: ${msg}` : String(msg)
+
+  return Object.entries(value)
+    .map(([key, nested]) => {
+      const formatted = formatApiErrorValue(nested)
+      return formatted ? `${key}: ${formatted}` : ''
+    })
+    .filter(Boolean)
+    .join('; ')
+}
+
 function readableApiError(status, data, fallback = '') {
   const text = typeof data === 'string'
     ? data
-    : data?.error_description || data?.error || data?.message || data?.detail || fallback
+    : data?.error_description
+      || (typeof data?.error === 'string' ? data.error : data?.error?.message)
+      || data?.message
+      || formatApiErrorValue(data?.detail)
+      || formatApiErrorValue(data?.errors)
+      || formatApiErrorValue(data)
+      || fallback
   const suffix = text ? `: ${String(text).slice(0, 240)}` : ''
   return `Higgsfield asset API error ${status}${suffix}`
 }
@@ -95,11 +124,63 @@ function extractUploadSlot(data) {
     ? data[0]
     : data?.upload || data?.media || data?.slot || data?.data || data
   const id = slot?.id || slot?.media_id || slot?.mediaId || data?.id
-  const uploadUrl = slot?.upload_url || slot?.uploadUrl || slot?.url || data?.upload_url
+  const uploadUrl = slot?.upload_url || slot?.uploadUrl || slot?.signed_url || slot?.signedUrl
+    || slot?.put_url || slot?.putUrl || slot?.presigned_url || slot?.presignedUrl
+    || data?.upload_url || data?.uploadUrl || slot?.url
   if (!id || !uploadUrl) {
     throw new Error('Higgsfield did not return a usable upload slot.')
   }
-  return { id, uploadUrl }
+  return {
+    id,
+    uploadUrl,
+    publicUrl: findPublicMediaUrl(slot) || findPublicMediaUrl(data),
+  }
+}
+
+function looksLikePublicMediaUrl(value) {
+  if (!/^https?:\/\//i.test(String(value || ''))) return false
+  try {
+    const url = new URL(value)
+    const raw = String(value)
+    if (/[?&](x-amz-|signature|expires|credential|policy)/i.test(raw)) return false
+    if (/amazonaws\.com|googleapis\.com|blob\.core\.windows\.net/i.test(url.hostname) && url.search) return false
+    return true
+  } catch {
+    return false
+  }
+}
+
+function findPublicMediaUrl(value, seen = new WeakSet()) {
+  if (!value) return ''
+  if (typeof value === 'string') return looksLikePublicMediaUrl(value) ? value : ''
+  if (typeof value !== 'object') return ''
+  if (seen.has(value)) return ''
+  seen.add(value)
+
+  const preferredKeys = [
+    'public_url',
+    'publicUrl',
+    'cloudfront_url',
+    'cloudfrontUrl',
+    'cdn_url',
+    'cdnUrl',
+    'asset_url',
+    'assetUrl',
+    'download_url',
+    'downloadUrl',
+    'image_url',
+    'imageUrl',
+    'url',
+  ]
+  for (const key of preferredKeys) {
+    const found = findPublicMediaUrl(value[key], seen)
+    if (found) return found
+  }
+  for (const nested of Object.values(value)) {
+    const found = findPublicMediaUrl(nested, seen)
+    if (found) return found
+  }
+  return ''
 }
 
 function mediaStatus(data) {
@@ -168,9 +249,11 @@ export async function uploadMarketingImage(dataUrl, { packageName = 'package', i
   })
   if (!putRes.ok) throw new Error(`Higgsfield image upload failed: ${putRes.status}`)
   const confirmation = await confirmFnfUpload(slot.id, 'image')
+  const publicUrl = findPublicMediaUrl(confirmation) || slot.publicUrl
   return {
     id: slot.id,
     uploadUrl: slot.uploadUrl,
+    publicUrl,
     contentType,
     sizeBytes: blob.size,
     confirmation,
@@ -187,21 +270,37 @@ export function selectPackageImagesForMarketingAsset(pack) {
   return items.slice(0, MAX_PRODUCT_IMAGES)
 }
 
-export function buildMarketingAssetRequestCandidates(pack, uploadIds) {
+function normalizeUploads(uploadsOrIds) {
+  return (uploadsOrIds || [])
+    .map(upload => typeof upload === 'string' ? { id: upload } : upload)
+    .filter(upload => upload?.id)
+}
+
+export function buildMarketingAssetRequestCandidates(pack, uploadsOrIds) {
+  const uploads = normalizeUploads(uploadsOrIds)
+  const uploadIds = uploads.map(upload => upload.id)
   const name = String(pack?.name || '').trim() || 'Untitled package'
   const description = String(pack?.notes || pack?.identityLock || pack?.styleLock || '').trim()
   if (pack?.type === 'product') {
     return [
+      { path: '/developer/v1alpha/marketing-studio/products', body: { title: name, description, image: uploadIds } },
       { path: '/developer/v1alpha/marketing-studio/products', body: { title: name, description, images: uploadIds } },
       { path: '/developer/v1alpha/marketing-studio/products', body: { title: name, description, image_ids: uploadIds } },
-      { path: '/developer/v1alpha/marketing-studio/products', body: { title: name, description, image: uploadIds } },
     ]
   }
-  const imageId = uploadIds[0]
+  const image = uploads[0]
+  const imageId = image?.id
+  const imageUrl = image?.publicUrl || image?.url || ''
+  const withImageUrl = imageUrl ? [
+    { path: '/developer/v1alpha/marketing-studio/avatars', body: { name, image: imageId, image_url: imageUrl } },
+    { path: '/developer/v1alpha/marketing-studio/avatars', body: { name, image_id: imageId, image_url: imageUrl } },
+    { path: '/developer/v1alpha/marketing-studio/avatars', body: { name, image: imageId, imageUrl } },
+  ] : []
   return [
-    { path: '/developer/v1alpha/marketing-studio/avatars', body: { name, image: imageId, pinned: true } },
-    { path: '/developer/v1alpha/marketing-studio/avatars', body: { name, image_id: imageId, pinned: true } },
-    { path: '/developer/v1alpha/marketing-studio/avatars', body: { name, images: [imageId], pinned: true } },
+    ...withImageUrl,
+    { path: '/developer/v1alpha/marketing-studio/avatars', body: { name, image: imageId } },
+    { path: '/developer/v1alpha/marketing-studio/avatars', body: { name, image_id: imageId } },
+    { path: '/developer/v1alpha/marketing-studio/avatars', body: { name, images: [imageId] } },
   ]
 }
 
@@ -236,9 +335,11 @@ export async function createPackageMarketingAsset(pack, onProgress) {
   }
 
   onProgress?.({ phase: 'asset', index: uploads.length, total: uploads.length })
-  const data = await postFirstSuccessful(buildMarketingAssetRequestCandidates(
-    pack,
-    uploads.map(upload => upload.id)
-  ))
+  const data = await postFirstSuccessful(buildMarketingAssetRequestCandidates(pack, uploads))
   return normalizeCreatedAsset(pack, data, uploads, selectedItems)
+}
+
+export const __testing = {
+  readableApiError,
+  findPublicMediaUrl,
 }
