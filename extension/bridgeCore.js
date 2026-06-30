@@ -63,6 +63,29 @@
     })
   }
 
+  function compactFlowPrompt(text) {
+    const parts = String(text || '')
+      .replace(/\r\n/g, '\n')
+      .split('\n')
+      .map(part => part.replace(/\s+/g, ' ').trim())
+      .filter(Boolean)
+
+    if (!parts.length) return ''
+
+    return parts
+      .map((part, index) => {
+        if (index === parts.length - 1 || /[.!?]$/.test(part)) return part
+        return `${part}.`
+      })
+      .join(' ')
+      .replace(/\s+/g, ' ')
+      .trim()
+  }
+
+  function preparePromptForHost(host, text) {
+    return isFlowHost(host) ? compactFlowPrompt(text) : String(text || '')
+  }
+
   function isLocalAppUrl(url) {
     return normalizeAppUrl(url) === LOCAL_APP_URL
   }
@@ -309,6 +332,42 @@
     return inserted
   }
 
+  function chunkPromptText(text, size = 180) {
+    const prompt = String(text || '')
+    if (!prompt) return ['']
+    const chunks = []
+    let cursor = 0
+    while (cursor < prompt.length) {
+      let end = Math.min(cursor + size, prompt.length)
+      if (end < prompt.length) {
+        const boundary = prompt.lastIndexOf(' ', end)
+        if (boundary > cursor + Math.floor(size * 0.55)) end = boundary + 1
+      }
+      chunks.push(prompt.slice(cursor, end))
+      cursor = end
+    }
+    return chunks
+  }
+
+  function insertTextInChunksWithEditorCommands(target, text) {
+    const prompt = String(text || '')
+    const doc = target?.ownerDocument || global.document
+    target.focus?.()
+    clearEditableTarget(target)
+    placeSelectionInEditable(target, false)
+
+    let insertedAny = false
+    for (const chunk of chunkPromptText(prompt)) {
+      dispatchTextEvent(target, 'beforeinput', chunk, { inputType: 'insertText' })
+      const inserted = Boolean(doc?.execCommand?.('insertText', false, chunk))
+      dispatchTextEvent(target, 'input', chunk, { inputType: 'insertText' })
+      if (!inserted && chunk) return false
+      insertedAny = insertedAny || inserted || !chunk
+    }
+    dispatchTextEvent(target, 'change', prompt)
+    return insertedAny
+  }
+
   function writePromptToSlateDomFallback(editor, text) {
     const prompt = String(text || '')
     const doc = editor.ownerDocument || global.document
@@ -335,7 +394,7 @@
     }
   }
 
-  function writePromptToSlateTarget(target, text) {
+  function writePromptToSlateTarget(target, text, options = {}) {
     const editor = findSlateEditor(target)
     if (!editor) return { ok: false, reason: 'missing-slate-editor' }
     const prompt = String(text || '')
@@ -346,10 +405,23 @@
       return { ok: true, strategy: 'slate-insert-text' }
     }
 
+    if (insertTextInChunksWithEditorCommands(editor, prompt) && textWasWritten(editor, prompt)) {
+      return { ok: true, strategy: 'slate-typed-chunks' }
+    }
+
+    if (options.allowDomFallback === false) {
+      return {
+        ok: false,
+        visibleDom: textWasWritten(editor, prompt),
+        strategy: 'slate-state-failed',
+        reason: 'flow-state-not-confirmed',
+      }
+    }
+
     return writePromptToSlateDomFallback(editor, prompt)
   }
 
-  async function writePromptToSlateTargetAsync(target, text) {
+  async function writePromptToSlateTargetAsync(target, text, options = {}) {
     const editor = findSlateEditor(target)
     if (!editor) return { ok: false, reason: 'missing-slate-editor' }
     const prompt = String(text || '')
@@ -368,17 +440,17 @@
       }
     }
 
-    return writePromptToSlateTarget(editor, prompt)
+    return writePromptToSlateTarget(editor, prompt, options)
   }
 
-  function writePromptToTarget(target, text) {
+  function writePromptToTarget(target, text, options = {}) {
     if (!target) return { ok: false, reason: 'missing-target' }
     const prompt = String(text || '')
     target.focus?.()
     target.click?.()
 
     if (isSlateTarget(target)) {
-      return writePromptToSlateTarget(target, prompt)
+      return writePromptToSlateTarget(target, prompt, options)
     }
 
     if ('value' in target) {
@@ -431,10 +503,10 @@
     return { ok: inserted && textWasWritten(target, prompt), strategy: inserted ? 'editable-insert' : 'editable-failed' }
   }
 
-  async function writePromptToTargetAsync(target, text) {
+  async function writePromptToTargetAsync(target, text, options = {}) {
     if (!target) return { ok: false, reason: 'missing-target' }
-    if (isSlateTarget(target)) return writePromptToSlateTargetAsync(target, text)
-    return writePromptToTarget(target, text)
+    if (isSlateTarget(target)) return writePromptToSlateTargetAsync(target, text, options)
+    return writePromptToTarget(target, text, options)
   }
 
   function submitPromptFromTarget(target) {
@@ -470,6 +542,8 @@
     getPreferredFlowModelLabels,
     normalizeSearchText,
     textMatchesAnyLabel,
+    compactFlowPrompt,
+    preparePromptForHost,
     isLocalAppUrl,
     isAppHost,
     isFlowHost,

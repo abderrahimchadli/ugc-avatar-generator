@@ -70,30 +70,32 @@ function mountToolPanel() {
 async function fillPrompt() {
   if (!activeSession?.prompt) return alert('Open a package prompt from the Avatar Studio app first.')
   if (UGCBridgeCore.isFlowHost(location.host)) await selectPreferredFlowModel()
+  const isFlow = UGCBridgeCore.isFlowHost(location.host)
+  const promptText = UGCBridgeCore.preparePromptForHost(location.host, activeSession.prompt)
   const target = findPromptTarget()
   if (!target) {
-    navigator.clipboard?.writeText(activeSession.prompt)
+    navigator.clipboard?.writeText(promptText)
     return alert('Prompt copied. Paste it into the prompt box manually.')
   }
-  const result = await UGCBridgeCore.writePromptToTargetAsync(target, activeSession.prompt)
+  const result = await UGCBridgeCore.writePromptToTargetAsync(target, promptText, { allowDomFallback: !isFlow })
   if (!result.ok) {
-    navigator.clipboard?.writeText(activeSession.prompt)
-    if (result.visibleDom && UGCBridgeCore.isFlowHost(location.host)) {
+    navigator.clipboard?.writeText(promptText)
+    if (result.visibleDom && isFlow) {
       setStatus('Flow shows the text, but Create is still disabled. Prompt copied for manual paste.')
     } else {
       setStatus('Prompt copied. Paste manually if Flow still says it is empty.')
     }
     return
   }
-  if (UGCBridgeCore.isFlowHost(location.host)) {
-    const accepted = await waitForGenerateReady(1800)
+  if (isFlow) {
+    const accepted = await waitForGenerateReady(3200)
     if (!accepted) {
-      navigator.clipboard?.writeText(activeSession.prompt)
+      navigator.clipboard?.writeText(promptText)
       setStatus('Flow did not enable Create after paste. Prompt copied for manual paste.')
       return
     }
   }
-  setStatus('Prompt pasted into the active editor.')
+  setStatus(isFlow ? 'Prompt pasted into Flow as one clean paragraph.' : 'Prompt pasted into the active editor.')
 }
 
 function findPromptTarget() {

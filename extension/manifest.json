@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "UGC Avatar Studio Bridge",
   "description": "Bridge prompts and generated images between Avatar Studio, Google Flow, ChatGPT, and Higgsfield packages.",
-  "version": "0.2.4",
+  "version": "0.2.5",
   "permissions": ["storage", "tabs", "activeTab", "scripting", "clipboardWrite", "clipboardRead"],
   "host_permissions": [
     "https://labs.google/*",

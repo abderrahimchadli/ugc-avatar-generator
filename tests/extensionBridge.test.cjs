@@ -32,6 +32,22 @@ test('defaults Google Flow sessions to Nano Banana Pro labels', () => {
   assert.equal(core.textMatchesAnyLabel('Current model: Veo 3', labels), false)
 })
 
+test('prepares Google Flow prompts as one clean paragraph', () => {
+  const prompt = [
+    'Package name: jack',
+    'Mode: main_portrait',
+    '',
+    'Style: realistic',
+    'Create one hero portrait for this avatar.',
+  ].join('\n')
+
+  assert.equal(
+    core.preparePromptForHost('labs.google', prompt),
+    'Package name: jack. Mode: main_portrait. Style: realistic. Create one hero portrait for this avatar.',
+  )
+  assert.equal(core.preparePromptForHost('chatgpt.com', prompt), prompt)
+})
+
 test('writes prompt through the native textarea setter and input events', () => {
   class FakeEvent {
     constructor(type, options = {}) {
@@ -243,7 +259,124 @@ test('Slate DOM fallback mirrors Flow structure but is not treated as accepted i
   assert.equal(string.getAttribute('data-slate-string'), 'true')
   assert.equal(string.textContent, 'Package name: jack')
   assert.equal(editor.children[1].children[0].children[0].children[0].textContent, 'Mode: main_portrait')
-  assert.deepEqual(editor.events, ['beforeinput', 'beforeinput', 'input', 'change'])
+  assert.deepEqual(editor.events.slice(0, 4), ['beforeinput', 'beforeinput', 'input', 'change'])
+  assert.equal(editor.events.includes('input'), true)
+})
+
+test('Slate writers try chunked input before using DOM-only fallback', () => {
+  class FakeEvent {
+    constructor(type, options = {}) {
+      this.type = type
+      Object.assign(this, options)
+    }
+  }
+  const prompt = 'Flow accepts this typed chunk. '.repeat(12).trim()
+  const editor = {
+    tagName: 'DIV',
+    attributes: { 'data-slate-editor': 'true', contenteditable: 'true' },
+    events: [],
+    textContent: '',
+    innerText: '',
+    firstChild: null,
+    focus() {
+      this.focused = true
+    },
+    click() {
+      this.clicked = true
+    },
+    matches(selector) {
+      return selector.split(',').some(part => {
+        const attr = part.trim().match(/^\[([^=\]]+)(?:="([^"]+)")?\]$/)
+        if (!attr) return false
+        const [, name, value] = attr
+        return value ? this.attributes[name] === value : Object.hasOwn(this.attributes, name)
+      })
+    },
+    querySelector() {
+      return null
+    },
+    dispatchEvent(event) {
+      this.events.push(event.type)
+      return true
+    },
+  }
+  const doc = {
+    commands: [],
+    defaultView: { Event: FakeEvent, InputEvent: FakeEvent },
+    getSelection: () => ({ removeAllRanges() {}, addRange() {} }),
+    createRange: () => ({ selectNodeContents() {}, collapse() {}, setStart() {} }),
+    execCommand(command, _ui, text = '') {
+      this.commands.push({ command, size: String(text || '').length })
+      if (command === 'delete') {
+        editor.textContent = ''
+        editor.innerText = ''
+        return true
+      }
+      if (command === 'insertText' && String(text || '').length <= 180) {
+        editor.textContent += text
+        editor.innerText += text
+        return true
+      }
+      return false
+    },
+  }
+  editor.ownerDocument = doc
+
+  const result = core.writePromptToTarget(editor, prompt, { allowDomFallback: false })
+  assert.equal(result.ok, true)
+  assert.equal(result.strategy, 'slate-typed-chunks')
+  assert.equal(editor.innerText, prompt)
+  assert.equal(doc.commands.some(entry => entry.command === 'insertText' && entry.size > 180), true)
+  assert.equal(doc.commands.filter(entry => entry.command === 'insertText' && entry.size <= 180).length > 1, true)
+})
+
+test('Flow Slate writers can skip DOM-only fallback when editor state is not confirmed', () => {
+  class FakeEvent {
+    constructor(type, options = {}) {
+      this.type = type
+      Object.assign(this, options)
+    }
+  }
+  const editor = {
+    tagName: 'DIV',
+    attributes: { 'data-slate-editor': 'true', contenteditable: 'true' },
+    events: [],
+    textContent: '',
+    innerText: '',
+    children: [],
+    firstChild: null,
+    focus() {},
+    click() {},
+    matches(selector) {
+      return selector.split(',').some(part => {
+        const attr = part.trim().match(/^\[([^=\]]+)(?:="([^"]+)")?\]$/)
+        if (!attr) return false
+        const [, name, value] = attr
+        return value ? this.attributes[name] === value : Object.hasOwn(this.attributes, name)
+      })
+    },
+    querySelector() {
+      return null
+    },
+    replaceChildren(...children) {
+      this.children = children
+    },
+    dispatchEvent(event) {
+      this.events.push(event.type)
+      return true
+    },
+    ownerDocument: {
+      defaultView: { Event: FakeEvent, InputEvent: FakeEvent },
+      getSelection: () => ({ removeAllRanges() {}, addRange() {} }),
+      createRange: () => ({ selectNodeContents() {}, collapse() {}, setStart() {} }),
+    },
+  }
+
+  const result = core.writePromptToTarget(editor, 'Flow prompt', { allowDomFallback: false })
+  assert.equal(result.ok, false)
+  assert.equal(result.strategy, 'slate-state-failed')
+  assert.equal(result.reason, 'flow-state-not-confirmed')
+  assert.equal(editor.children.length, 0)
 })
 
 test('uses clipboard paste for Slate editors when Flow accepts a real paste', async () => {
