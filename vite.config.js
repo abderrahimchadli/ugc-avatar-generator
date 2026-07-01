@@ -109,6 +109,11 @@ export default defineConfig({
         changeOrigin: true,
         rewrite: path => path.replace(/^\/api\/hf/, ''),
       },
+      '/api/fnf': {
+        target: 'https://fnf-api-gw.higgsfield.ai',
+        changeOrigin: true,
+        rewrite: path => path.replace(/^\/api\/fnf/, '/fnf'),
+      },
     },
   },
 })

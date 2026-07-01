@@ -1,4 +1,5 @@
 const AUTH_PROXY = '/api/hf'           // fetch calls — goes through proxy, bypasses CORS
+const FNF_PROXY = '/api/fnf'
 const AUTH_DIRECT = 'https://mcp.higgsfield.ai' // browser redirect — must be real URL
 
 // Higgsfield rate-limits its OAuth endpoints by IP. Because every user's traffic
@@ -20,6 +21,17 @@ const WORKSPACE_ID_KEYS = [
   'fnfWorkspaceId',
 ]
 const IDENTITY_ID_KEYS = ['sub', 'user_id', 'userId', 'account_id', 'accountId', 'id', 'uuid']
+const OAUTH_WORKSPACE_PATHS = ['/oauth2/userinfo', '/oauth2/userinfo/']
+const FNF_WORKSPACE_PATHS = [
+  '/developer/v1alpha/workspaces',
+  '/developer/v1alpha/workspaces/current',
+  '/developer/v1alpha/workspace',
+  '/developer/v1alpha/me',
+  '/developer/v1alpha/user',
+  '/developer/v1alpha/profile',
+  '/developer/v2alpha/workspaces',
+  '/developer/v2alpha/me',
+]
 
 // Exponential backoff with jitter: ~0.5s, 1s, 2s, 4s (+ up to 0.4s jitter)
 function backoffMs(attempt) {
@@ -75,6 +87,10 @@ function safeStorageSet(key, value) {
   try { if (value) localStorage.setItem(key, value) } catch {}
 }
 
+function safeStorageRemove(key) {
+  try { localStorage.removeItem(key) } catch {}
+}
+
 function base64UrlDecode(value) {
   const normalized = String(value || '').replace(/-/g, '+').replace(/_/g, '/')
   const padded = normalized.padEnd(Math.ceil(normalized.length / 4) * 4, '=')
@@ -95,6 +111,14 @@ function firstWorkspaceId(value, seen = new WeakSet()) {
   if (typeof value !== 'object') return ''
   if (seen.has(value)) return ''
   seen.add(value)
+
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      const found = firstWorkspaceId(item, seen)
+      if (found) return found
+    }
+    return ''
+  }
 
   for (const key of WORKSPACE_ID_KEYS) {
     const direct = firstWorkspaceId(value[key], seen)
@@ -127,6 +151,14 @@ function firstIdentityId(value, seen = new WeakSet()) {
   if (typeof value !== 'object') return ''
   if (seen.has(value)) return ''
   seen.add(value)
+
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      const found = firstIdentityId(item, seen)
+      if (found) return found
+    }
+    return ''
+  }
 
   for (const key of IDENTITY_ID_KEYS) {
     const candidate = value[key]
@@ -309,6 +341,18 @@ export async function handleOAuthCallback(code, state) {
 }
 
 export function getHFToken() { return localStorage.getItem('hf_access_token') }
+
+export function setHFWorkspaceId(value) {
+  const cleaned = String(value || '').trim()
+  if (cleaned) safeStorageSet(HF_WORKSPACE_KEY, cleaned)
+  else safeStorageRemove(HF_WORKSPACE_KEY)
+  return cleaned
+}
+
+export function clearHFWorkspaceId() {
+  safeStorageRemove(HF_WORKSPACE_KEY)
+}
+
 export function getHFWorkspaceId() {
   const stored = safeStorageGet(HF_WORKSPACE_KEY)
   if (stored) return stored
@@ -317,26 +361,50 @@ export function getHFWorkspaceId() {
   safeStorageSet(HF_WORKSPACE_KEY, fromToken)
   return fromToken
 }
-export async function ensureHFWorkspaceId() {
+
+async function fetchWorkspaceCandidate(url, token) {
+  try {
+    const res = await fetchWithRetry(url, {
+      headers: { Accept: 'application/json', Authorization: `Bearer ${token}` },
+    }, { attempts: 2, perAttemptTimeoutMs: 10000 })
+    if (!res.ok) return null
+    return await res.json().catch(() => null)
+  } catch {
+    return null
+  }
+}
+
+function workspaceIdFromDiscoveryData(data) {
+  return firstWorkspaceId(data) || firstIdentityId(data)
+}
+
+async function discoverHFWorkspaceId(token) {
+  for (const path of OAUTH_WORKSPACE_PATHS) {
+    const data = await fetchWorkspaceCandidate(`${AUTH_PROXY}${path}`, token)
+    const found = workspaceIdFromDiscoveryData(data)
+    if (found) return found
+  }
+
+  for (const path of FNF_WORKSPACE_PATHS) {
+    const data = await fetchWorkspaceCandidate(`${FNF_PROXY}${path}`, token)
+    const found = workspaceIdFromDiscoveryData(data)
+    if (found) return found
+  }
+
+  return ''
+}
+
+export async function ensureHFWorkspaceId({ refresh = false } = {}) {
   const existing = getHFWorkspaceId()
-  if (existing) return existing
+  if (existing && !refresh) return existing
 
   const token = getHFToken()
   if (!token) return ''
 
-  let data = null
-  try {
-    const res = await fetchWithRetry(`${AUTH_PROXY}/oauth2/userinfo`, {
-      headers: { Accept: 'application/json', Authorization: `Bearer ${token}` },
-    }, { attempts: 2, perAttemptTimeoutMs: 10000 })
-    if (res.ok) data = await res.json().catch(() => null)
-  } catch {
-    data = null
-  }
-
-  const discovered = firstWorkspaceId(data)
-    || firstIdentityId(data)
-    || firstIdentityId(decodeJwtPayload(token))
+  const payload = decodeJwtPayload(token)
+  const discovered = await discoverHFWorkspaceId(token)
+    || firstWorkspaceId(payload)
+    || firstIdentityId(payload)
   safeStorageSet(HF_WORKSPACE_KEY, discovered)
   return discovered
 }

@@ -77,7 +77,7 @@ async function fnfRequest(path, { method = 'GET', body = null, headers = {} } = 
   const token = getHFToken()
   const workspaceId = await ensureHFWorkspaceId()
   if (!workspaceId) {
-    throw new Error('Higgsfield workspace is missing. Disconnect and reconnect Higgsfield in Settings, then try creating the asset again.')
+    throw new Error('Higgsfield workspace is missing. Open Settings, click Auto-detect beside Higgsfield workspace, or paste your workspace ID, then try creating the asset again.')
   }
   const requestHeaders = {
     Accept: 'application/json',

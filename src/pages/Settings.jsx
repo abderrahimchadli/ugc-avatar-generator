@@ -1,6 +1,13 @@
 import { useEffect, useState } from 'react'
 import { useLocation } from 'react-router-dom'
-import { disconnectHF, isHFConnected, startHiggsfieldOAuthPopup } from '../utils/higgsfieldAuth'
+import {
+  disconnectHF,
+  ensureHFWorkspaceId,
+  getHFWorkspaceId,
+  isHFConnected,
+  setHFWorkspaceId,
+  startHiggsfieldOAuthPopup,
+} from '../utils/higgsfieldAuth'
 import { useAuth } from '../context/auth'
 import { usePackages } from '../context/packageStore'
 import { formatBytes } from '../utils/promptPresets'
@@ -11,10 +18,21 @@ export default function Settings() {
   const { storageStats, serverStatus, hasServerStorage } = usePackages()
   const [hfConnected, setHfConnected] = useState(isHFConnected)
   const [hfLoading, setHfLoading] = useState(false)
+  const [workspaceId, setWorkspaceIdValue] = useState(() => getHFWorkspaceId())
+  const [workspaceInput, setWorkspaceInput] = useState(() => getHFWorkspaceId())
+  const [workspaceLoading, setWorkspaceLoading] = useState(false)
+  const [workspaceMessage, setWorkspaceMessage] = useState('')
 
   useEffect(() => {
     const params = new URLSearchParams(location.search)
-    if (params.get('connected') === '1') setHfConnected(true)
+    if (params.get('connected') === '1') {
+      setHfConnected(true)
+      ensureHFWorkspaceId().then(id => {
+        setWorkspaceIdValue(id)
+        setWorkspaceInput(id)
+        if (id) setWorkspaceMessage('Higgsfield workspace detected.')
+      }).catch(() => {})
+    }
   }, [location.search])
 
   async function connectHiggsfield() {
@@ -22,12 +40,53 @@ export default function Settings() {
     try {
       await startHiggsfieldOAuthPopup()
       setHfConnected(true)
+      const detected = await ensureHFWorkspaceId({ refresh: true })
+      setWorkspaceIdValue(detected)
+      setWorkspaceInput(detected)
+      setWorkspaceMessage(detected ? 'Higgsfield workspace detected.' : 'Connected. Paste the Higgsfield workspace ID below if asset creation still asks for it.')
     } catch (e) {
       if (e.message !== 'cancelled') alert('Failed to connect Higgsfield: ' + e.message)
     } finally {
       setHfLoading(false)
     }
   }
+
+  function disconnectHiggsfield() {
+    disconnectHF()
+    setHfConnected(false)
+    setWorkspaceIdValue('')
+    setWorkspaceInput('')
+    setWorkspaceMessage('')
+  }
+
+  function saveWorkspace(event) {
+    event.preventDefault()
+    const saved = setHFWorkspaceId(workspaceInput)
+    setWorkspaceIdValue(saved)
+    setWorkspaceInput(saved)
+    setWorkspaceMessage(saved ? 'Higgsfield workspace saved.' : 'Higgsfield workspace cleared.')
+  }
+
+  async function detectWorkspace() {
+    if (!hfConnected) {
+      setWorkspaceMessage('Connect Higgsfield first.')
+      return
+    }
+    setWorkspaceLoading(true)
+    setWorkspaceMessage('Looking for Higgsfield workspace...')
+    try {
+      const detected = await ensureHFWorkspaceId({ refresh: true })
+      setWorkspaceIdValue(detected)
+      setWorkspaceInput(detected)
+      setWorkspaceMessage(detected ? 'Higgsfield workspace detected.' : 'Could not auto-detect the workspace. Paste the workspace ID manually.')
+    } catch (e) {
+      setWorkspaceMessage(`Could not auto-detect the workspace: ${e.message}`)
+    } finally {
+      setWorkspaceLoading(false)
+    }
+  }
+
+  const shortWorkspaceId = workspaceId ? `${workspaceId.slice(0, 10)}${workspaceId.length > 10 ? '...' : ''}` : ''
 
   return (
     <main className="page-shell narrow">
@@ -50,10 +109,30 @@ export default function Settings() {
         <div className="settings-row">
           <div><strong>Higgsfield</strong><span>{hfConnected ? 'Connected for Marketing Studio assets' : 'Not connected'}</span></div>
           {hfConnected ? (
-            <button className="danger-btn" onClick={() => { disconnectHF(); setHfConnected(false) }}>Disconnect</button>
+            <button className="danger-btn" onClick={disconnectHiggsfield}>Disconnect</button>
           ) : (
             <button className="primary-btn" onClick={connectHiggsfield} disabled={hfLoading}>{hfLoading ? 'Connecting…' : 'Connect Higgsfield'}</button>
           )}
+        </div>
+        <div className="settings-row workspace-row">
+          <div>
+            <strong>Higgsfield workspace</strong>
+            <span>{workspaceId ? `Saved ${shortWorkspaceId} for asset creation` : 'Required for Marketing Studio asset creation. Auto-detect it or paste the workspace ID here.'}</span>
+            {workspaceMessage ? <span className="settings-note">{workspaceMessage}</span> : null}
+          </div>
+          <form className="workspace-form" onSubmit={saveWorkspace}>
+            <input
+              value={workspaceInput}
+              onChange={event => setWorkspaceInput(event.target.value)}
+              placeholder="Workspace ID"
+              aria-label="Higgsfield workspace ID"
+              disabled={!hfConnected}
+            />
+            <button className="secondary-btn" type="button" onClick={detectWorkspace} disabled={!hfConnected || workspaceLoading}>
+              {workspaceLoading ? 'Checking...' : 'Auto-detect'}
+            </button>
+            <button className="primary-btn" type="submit" disabled={!hfConnected}>Save</button>
+          </form>
         </div>
         <div className="settings-row">
           <div><strong>Remove images</strong><span>Use Library image remove buttons. When server storage is configured, the matching server item is deleted too.</span></div>
