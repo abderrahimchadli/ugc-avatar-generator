@@ -17,17 +17,20 @@ function installLocalStorage(seed = {}) {
   return values
 }
 
-test('selects one preferred portrait image for avatar assets', () => {
+test('selects up to four avatar images with preferred portrait first', () => {
   const pack = {
     type: 'avatar',
     items: [
       { id: 'style', mode: 'style_sheet', url: 'data:image/png;base64,style' },
       { id: 'hero', mode: 'main_portrait', url: 'data:image/png;base64,hero' },
+      { id: 'face', label: 'Face closeup', url: 'data:image/png;base64,face' },
+      { id: 'pose', mode: 'pose_sheet', url: 'data:image/png;base64,pose' },
+      { id: 'extra', mode: 'detail', url: 'data:image/png;base64,extra' },
       { id: 'empty', mode: 'detail' },
     ],
   }
 
-  assert.deepEqual(selectPackageImagesForMarketingAsset(pack).map(item => item.id), ['hero'])
+  assert.deepEqual(selectPackageImagesForMarketingAsset(pack).map(item => item.id), ['hero', 'face', 'style', 'pose'])
 })
 
 test('selects up to eight images for product assets', () => {
@@ -68,7 +71,7 @@ test('builds Marketing Studio product create candidates with uploaded image ids'
   })
 })
 
-test('builds Marketing Studio avatar create candidates with upload id and public URL', () => {
+test('builds Marketing Studio avatar create candidates with avatars array', () => {
   const [primary] = buildMarketingAssetRequestCandidates(
     { type: 'avatar', name: 'Camila' },
     [{ id: 'up_avatar', publicUrl: 'https://cdn.example.com/avatar.png' }]
@@ -79,8 +82,21 @@ test('builds Marketing Studio avatar create candidates with upload id and public
     action: 'create',
     type: 'avatar',
     name: 'Camila',
-    image: 'up_avatar',
-    image_url: 'https://cdn.example.com/avatar.png',
+    avatars: ['up_avatar'],
+  })
+})
+
+test('keeps avatar object fallback with custom type and public URL', () => {
+  const candidates = buildMarketingAssetRequestCandidates(
+    { type: 'avatar', name: 'Camila' },
+    [{ id: 'up_avatar', publicUrl: 'https://cdn.example.com/avatar.png' }]
+  )
+
+  assert.deepEqual(candidates[2].args, {
+    action: 'create',
+    type: 'avatar',
+    name: 'Camila',
+    avatars: [{ id: 'up_avatar', type: 'custom', image_url: 'https://cdn.example.com/avatar.png' }],
   })
 })
 
@@ -94,7 +110,7 @@ test('keeps avatar upload id fallback when no public URL is available', () => {
     action: 'create',
     type: 'avatar',
     name: 'Camila',
-    image: 'up_avatar',
+    avatars: ['up_avatar'],
   })
 })
 
@@ -170,8 +186,7 @@ test('creates avatar assets through MCP without requiring a workspace id', async
       if (body.method === 'tools/call' && body.params.name === 'show_marketing_studio') {
         assert.equal(body.params.arguments.action, 'create')
         assert.equal(body.params.arguments.type, 'avatar')
-        assert.equal(body.params.arguments.image, 'media_1')
-        assert.equal(body.params.arguments.image_url, 'https://cdn.example.com/media_1.png')
+        assert.deepEqual(body.params.arguments.avatars, ['media_1'])
         return {
           ok: true,
           status: 200,

@@ -7,6 +7,7 @@ import {
 } from './higgsfieldGenerate.js'
 
 const MAX_PRODUCT_IMAGES = 8
+const MAX_AVATAR_IMAGES = 4
 
 export const HIGGSFIELD_ASSET_NOTE = 'Created as a Higgsfield Marketing Studio asset for reuse in Higgsfield ad and video workflows.'
 
@@ -130,9 +131,13 @@ export async function uploadMarketingImage(dataUrl, { packageName = 'package', i
 export function selectPackageImagesForMarketingAsset(pack) {
   const items = (pack?.items || []).filter(item => item?.url)
   if (pack?.type === 'avatar') {
-    const preferred = items.find(item => /main|portrait|hero|face/i.test(`${item.mode || ''} ${item.label || ''}`))
-      || items[0]
-    return preferred ? [preferred] : []
+    return [...items]
+      .sort((a, b) => {
+        const aPreferred = /main|portrait|hero|face/i.test(`${a.mode || ''} ${a.label || ''}`) ? 0 : 1
+        const bPreferred = /main|portrait|hero|face/i.test(`${b.mode || ''} ${b.label || ''}`) ? 0 : 1
+        return aPreferred - bPreferred
+      })
+      .slice(0, MAX_AVATAR_IMAGES)
   }
   return items.slice(0, MAX_PRODUCT_IMAGES)
 }
@@ -155,19 +160,16 @@ export function buildMarketingAssetRequestCandidates(pack, uploadsOrIds) {
       { tool: 'show_marketing_studio', args: { action: 'create', type: 'product', title: name, description, image: uploadIds } },
     ]
   }
-  const image = uploads[0]
-  const imageId = image?.id
-  const imageUrl = image?.publicUrl || image?.url || ''
-  const withImageUrl = imageUrl ? [
-    { tool: 'show_marketing_studio', args: { action: 'create', type: 'avatar', name, image: imageId, image_url: imageUrl } },
-    { tool: 'show_marketing_studio', args: { action: 'create', type: 'avatar', name, image_id: imageId, image_url: imageUrl } },
-    { tool: 'show_marketing_studio', args: { action: 'create', type: 'avatar', name, medias: [imageId], image_url: imageUrl } },
-  ] : []
+  const avatarObjects = uploads.map(upload => ({
+    id: upload.id,
+    type: 'custom',
+    ...(upload.publicUrl || upload.url ? { image_url: upload.publicUrl || upload.url } : {}),
+  }))
   return [
-    ...withImageUrl,
-    { tool: 'show_marketing_studio', args: { action: 'create', type: 'avatar', name, image: imageId } },
-    { tool: 'show_marketing_studio', args: { action: 'create', type: 'avatar', name, image_id: imageId } },
-    { tool: 'show_marketing_studio', args: { action: 'create', type: 'avatar', name, medias: [imageId] } },
+    { tool: 'show_marketing_studio', args: { action: 'create', type: 'avatar', name, avatars: uploadIds } },
+    { tool: 'show_marketing_studio', args: { action: 'create', type: 'avatar', title: name, avatars: uploadIds } },
+    { tool: 'show_marketing_studio', args: { action: 'create', type: 'avatar', name, avatars: avatarObjects } },
+    { tool: 'show_marketing_studio', args: { action: 'create', type: 'avatar', title: name, avatars: avatarObjects } },
   ]
 }
 
@@ -211,7 +213,9 @@ function mcpErrorText(result, data) {
     const text = result.content?.map(item => item.text).filter(Boolean).join('; ')
     return text || 'Higgsfield returned an MCP error.'
   }
+  if (typeof data === 'string' && /error|invalid|missing|required|requires|request id/i.test(data)) return data
   if (data?.error) return typeof data.error === 'string' ? data.error : formatApiErrorValue(data.error)
+  if (data?.message && /error|invalid|missing|required|requires|request id/i.test(String(data.message))) return String(data.message)
   if (data?.detail) return formatApiErrorValue(data.detail)
   return ''
 }
@@ -230,7 +234,7 @@ async function callFirstMarketingStudioCandidate(candidates) {
       return { data, id }
     } catch (error) {
       lastError = error
-      if (!/unknown tool|invalid|missing|required|not found|validation|field/i.test(error.message || '')) throw error
+      if (!/unknown tool|invalid|missing|required|requires|not found|validation|field|did not return/i.test(error.message || '')) throw error
     }
   }
   throw lastError || new Error('Higgsfield Marketing Studio asset request failed.')
