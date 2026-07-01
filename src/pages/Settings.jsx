@@ -6,7 +6,7 @@ import {
   getHFWorkspaceId,
   isHFConnected,
   setHFWorkspaceId,
-  startHiggsfieldOAuthPopup,
+  startHiggsfieldOAuth,
 } from '../utils/higgsfieldAuth'
 import { useAuth } from '../context/auth'
 import { usePackages } from '../context/packageStore'
@@ -38,16 +38,13 @@ export default function Settings() {
   async function connectHiggsfield() {
     setHfLoading(true)
     try {
-      await startHiggsfieldOAuthPopup()
-      setHfConnected(true)
-      const detected = await ensureHFWorkspaceId({ refresh: true })
-      setWorkspaceIdValue(detected)
-      setWorkspaceInput(detected)
-      setWorkspaceMessage(detected ? 'Higgsfield workspace detected.' : 'Connected. Paste the Higgsfield workspace ID below if asset creation still asks for it.')
+      localStorage.setItem('hf_return_url', '/settings?connected=1')
+      await startHiggsfieldOAuth()
     } catch (e) {
-      if (e.message !== 'cancelled') alert('Failed to connect Higgsfield: ' + e.message)
-    } finally {
+      alert('Failed to connect Higgsfield: ' + e.message)
       setHfLoading(false)
+    } finally {
+      if (window.location.pathname === '/settings') setHfLoading(false)
     }
   }
 
