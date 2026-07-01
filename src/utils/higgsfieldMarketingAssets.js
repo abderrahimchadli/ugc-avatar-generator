@@ -75,9 +75,12 @@ function makeApiError(status, data, fallback = '') {
 
 async function fnfRequest(path, { method = 'GET', body = null, headers = {} } = {}, isRetry = false) {
   const token = getHFToken()
+  if (!token) {
+    throw new Error('Connect Higgsfield in Settings first. A Higgsfield website login in Chrome does not give this app an API token.')
+  }
   const workspaceId = await ensureHFWorkspaceId()
   if (!workspaceId) {
-    throw new Error('Higgsfield workspace is missing. Open Settings, click Auto-detect beside Higgsfield workspace, or paste your workspace ID, then try creating the asset again.')
+    throw new Error('Higgsfield did not expose a workspace ID through the connected account. Open Settings and run Higgsfield diagnostics. This Marketing Studio API path may not be available for your account yet.')
   }
   const requestHeaders = {
     Accept: 'application/json',
@@ -337,6 +340,10 @@ export async function createPackageMarketingAsset(pack, onProgress) {
       packageName: pack.name,
       index: i + 1,
     }))
+  }
+
+  if (pack.type !== 'product' && !uploads[0]?.publicUrl) {
+    throw new Error('Higgsfield accepted the image upload but did not return the public image URL required for Marketing Studio avatar creation. The current private Higgsfield API path is not enough; use Settings diagnostics or a Higgsfield browser upload bridge.')
   }
 
   onProgress?.({ phase: 'asset', index: uploads.length, total: uploads.length })

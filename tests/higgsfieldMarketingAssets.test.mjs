@@ -3,8 +3,19 @@ import assert from 'node:assert/strict'
 import {
   __testing,
   buildMarketingAssetRequestCandidates,
+  createPackageMarketingAsset,
   selectPackageImagesForMarketingAsset,
 } from '../src/utils/higgsfieldMarketingAssets.js'
+
+function installLocalStorage(seed = {}) {
+  const values = new Map(Object.entries(seed))
+  globalThis.localStorage = {
+    getItem: key => values.get(key) || null,
+    setItem: (key, value) => values.set(key, String(value)),
+    removeItem: key => values.delete(key),
+  }
+  return values
+}
 
 test('selects one preferred portrait image for avatar assets', () => {
   const pack = {
@@ -97,4 +108,51 @@ test('extracts public media URLs while ignoring signed upload URLs', () => {
   })
 
   assert.equal(publicUrl, 'https://d8j0ntlcm91z4.cloudfront.net/user/file.webp')
+})
+
+test('stops avatar asset creation when Higgsfield upload returns no public image URL', async () => {
+  installLocalStorage({
+    hf_access_token: 'token_1',
+    hf_workspace_id: 'workspace_1',
+  })
+  const calls = []
+  globalThis.fetch = async (url, options = {}) => {
+    const href = String(url)
+    calls.push(href)
+    if (href.startsWith('data:')) {
+      return {
+        ok: true,
+        blob: async () => new Blob(['image-bytes'], { type: 'image/png' }),
+      }
+    }
+    if (href.startsWith('https://upload.example.com')) {
+      return { ok: true, status: 200 }
+    }
+    if (href.includes('/confirm')) {
+      return {
+        ok: true,
+        status: 200,
+        text: async () => JSON.stringify({ id: 'media_1', status: 'complete' }),
+      }
+    }
+    assert.equal(options.headers['X-Fnf-Workspace-Id'], 'workspace_1')
+    return {
+      ok: true,
+      status: 200,
+      text: async () => JSON.stringify({
+        id: 'media_1',
+        upload_url: 'https://upload.example.com/file?X-Amz-Signature=abc',
+      }),
+    }
+  }
+
+  await assert.rejects(
+    () => createPackageMarketingAsset({
+      type: 'avatar',
+      name: 'No Public Url',
+      items: [{ id: 'hero', mode: 'main_portrait', url: 'data:image/png;base64,abcd' }],
+    }),
+    /did not return the public image URL/
+  )
+  assert.equal(calls.some(url => url.includes('/marketing-studio/avatars')), false)
 })

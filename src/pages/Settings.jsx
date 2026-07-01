@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useLocation } from 'react-router-dom'
 import {
+  diagnoseHFWorkspace,
   disconnectHF,
   ensureHFWorkspaceId,
   getHFWorkspaceId,
@@ -12,6 +13,24 @@ import { useAuth } from '../context/auth'
 import { usePackages } from '../context/packageStore'
 import { formatBytes } from '../utils/promptPresets'
 
+function shortId(value) {
+  const text = String(value || '')
+  return text ? `${text.slice(0, 10)}${text.length > 10 ? '...' : ''}` : ''
+}
+
+function diagnosticMessage(result) {
+  if (!result?.connected) {
+    return 'The app is not connected to Higgsfield. A normal Higgsfield website login in Chrome is separate from this app connection.'
+  }
+  if (result.detectedWorkspaceId) {
+    return `Workspace detected: ${shortId(result.detectedWorkspaceId)}.`
+  }
+  if (result.savedWorkspaceId) {
+    return 'Using a saved manual workspace ID, but Higgsfield did not confirm it through the checked endpoints.'
+  }
+  return 'No workspace ID was exposed by Higgsfield OAuth or FNF workspace endpoints. Manual paste only helps if Higgsfield support or API documentation gives you that ID.'
+}
+
 export default function Settings() {
   const location = useLocation()
   const { profile, isApproved, isSuperUser } = useAuth()
@@ -22,6 +41,7 @@ export default function Settings() {
   const [workspaceInput, setWorkspaceInput] = useState(() => getHFWorkspaceId())
   const [workspaceLoading, setWorkspaceLoading] = useState(false)
   const [workspaceMessage, setWorkspaceMessage] = useState('')
+  const [workspaceDiagnostics, setWorkspaceDiagnostics] = useState(null)
 
   useEffect(() => {
     const params = new URLSearchParams(location.search)
@@ -68,28 +88,43 @@ export default function Settings() {
     } else {
       setWorkspaceMessage('Higgsfield workspace saved.')
     }
+    setWorkspaceDiagnostics(null)
   }
 
-  async function detectWorkspace() {
+  async function runWorkspaceDiagnostics() {
     if (!hfConnected) {
       setWorkspaceMessage('Connect Higgsfield first, then Auto-detect can read the workspace from your Higgsfield account.')
-      return
+      const result = await diagnoseHFWorkspace()
+      setWorkspaceDiagnostics(result)
+      return result
     }
     setWorkspaceLoading(true)
-    setWorkspaceMessage('Looking for Higgsfield workspace...')
+    setWorkspaceMessage('Checking Higgsfield workspace endpoints...')
     try {
-      const detected = await ensureHFWorkspaceId({ refresh: true })
-      setWorkspaceIdValue(detected)
-      setWorkspaceInput(detected)
-      setWorkspaceMessage(detected ? 'Higgsfield workspace detected.' : 'Could not auto-detect the workspace. Paste the workspace ID manually.')
+      const result = await diagnoseHFWorkspace()
+      setWorkspaceDiagnostics(result)
+      if (result.detectedWorkspaceId) {
+        setWorkspaceIdValue(result.detectedWorkspaceId)
+        setWorkspaceInput(result.detectedWorkspaceId)
+      } else if (!workspaceInput && result.resolvedWorkspaceId) {
+        setWorkspaceIdValue(result.resolvedWorkspaceId)
+        setWorkspaceInput(result.resolvedWorkspaceId)
+      }
+      setWorkspaceMessage(diagnosticMessage(result))
+      return result
     } catch (e) {
-      setWorkspaceMessage(`Could not auto-detect the workspace: ${e.message}`)
+      setWorkspaceMessage(`Could not run Higgsfield workspace diagnostics: ${e.message}`)
+      return null
     } finally {
       setWorkspaceLoading(false)
     }
   }
 
-  const shortWorkspaceId = workspaceId ? `${workspaceId.slice(0, 10)}${workspaceId.length > 10 ? '...' : ''}` : ''
+  async function detectWorkspace() {
+    await runWorkspaceDiagnostics()
+  }
+
+  const shortWorkspaceId = shortId(workspaceId)
 
   return (
     <main className="page-shell narrow">
@@ -120,7 +155,7 @@ export default function Settings() {
         <div className="settings-row workspace-row">
           <div>
             <strong>Higgsfield workspace</strong>
-            <span>{workspaceId ? `Saved ${shortWorkspaceId} for asset creation` : 'Required for Marketing Studio asset creation. Auto-detect it or paste the workspace ID here.'}</span>
+            <span>{workspaceId ? `Saved ${shortWorkspaceId} for asset creation` : 'Required for Marketing Studio asset creation. Auto-detect will only work if Higgsfield exposes a workspace through the connected account.'}</span>
             {workspaceMessage ? <span className="settings-note">{workspaceMessage}</span> : null}
           </div>
           <form className="workspace-form" onSubmit={saveWorkspace}>
@@ -133,9 +168,33 @@ export default function Settings() {
             <button className="secondary-btn" type="button" onClick={detectWorkspace} disabled={workspaceLoading}>
               {workspaceLoading ? 'Checking...' : 'Auto-detect'}
             </button>
+            <button className="secondary-btn" type="button" onClick={runWorkspaceDiagnostics} disabled={workspaceLoading}>
+              Diagnostics
+            </button>
             <button className="primary-btn" type="submit">Save</button>
           </form>
         </div>
+        {workspaceDiagnostics && (
+          <div className="diagnostic-box" aria-label="Higgsfield workspace diagnostics">
+            <strong>Higgsfield diagnostic</strong>
+            <span>{diagnosticMessage(workspaceDiagnostics)}</span>
+            <div className="diagnostic-grid">
+              <span>Connection: {workspaceDiagnostics.connected ? 'connected' : 'not connected'}</span>
+              <span>Saved workspace: {workspaceDiagnostics.savedWorkspaceId ? shortId(workspaceDiagnostics.savedWorkspaceId) : 'none'}</span>
+              <span>Detected workspace: {workspaceDiagnostics.detectedWorkspaceId ? shortId(workspaceDiagnostics.detectedWorkspaceId) : 'none'}</span>
+            </div>
+            {workspaceDiagnostics.checks?.length ? (
+              <ul>
+                {workspaceDiagnostics.checks.map(check => (
+                  <li key={`${check.path}-${check.status}`}>
+                    <strong>{check.path}</strong>
+                    <span>{check.ok ? 'OK' : `Failed ${check.status}`} · {check.summary}</span>
+                  </li>
+                ))}
+              </ul>
+            ) : null}
+          </div>
+        )}
         <div className="settings-row">
           <div><strong>Remove images</strong><span>Use Library image remove buttons. When server storage is configured, the matching server item is deleted too.</span></div>
           <a className="secondary-btn" href="/library">Open library</a>

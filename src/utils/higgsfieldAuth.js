@@ -8,6 +8,7 @@ const AUTH_DIRECT = 'https://mcp.higgsfield.ai' // browser redirect — must be 
 const RETRYABLE_STATUS = new Set([429, 500, 502, 503, 504])
 const sleep = ms => new Promise(r => setTimeout(r, ms))
 const HF_WORKSPACE_KEY = 'hf_workspace_id'
+const SENSITIVE_KEY_RE = /(token|secret|auth|cookie|session|jwt|bearer|refresh|access|credential|password)/i
 const WORKSPACE_ID_KEYS = [
   'workspace_id',
   'workspaceId',
@@ -20,7 +21,6 @@ const WORKSPACE_ID_KEYS = [
   'fnf_workspace_id',
   'fnfWorkspaceId',
 ]
-const IDENTITY_ID_KEYS = ['sub', 'user_id', 'userId', 'account_id', 'accountId', 'id', 'uuid']
 const OAUTH_WORKSPACE_PATHS = ['/oauth2/userinfo', '/oauth2/userinfo/']
 const FNF_WORKSPACE_PATHS = [
   '/developer/v1alpha/workspaces',
@@ -145,43 +145,10 @@ function firstWorkspaceId(value, seen = new WeakSet()) {
   return ''
 }
 
-function firstIdentityId(value, seen = new WeakSet()) {
-  if (!value) return ''
-  if (typeof value === 'string') return value.trim()
-  if (typeof value !== 'object') return ''
-  if (seen.has(value)) return ''
-  seen.add(value)
-
-  if (Array.isArray(value)) {
-    for (const item of value) {
-      const found = firstIdentityId(item, seen)
-      if (found) return found
-    }
-    return ''
-  }
-
-  for (const key of IDENTITY_ID_KEYS) {
-    const candidate = value[key]
-    if (typeof candidate === 'string' && candidate.trim()) return candidate.trim()
-    if (candidate && typeof candidate === 'object') {
-      const found = firstIdentityId(candidate, seen)
-      if (found) return found
-    }
-  }
-
-  for (const key of ['user', 'account', 'profile', 'identity']) {
-    const found = firstIdentityId(value[key], seen)
-    if (found) return found
-  }
-  return ''
-}
-
 function workspaceIdFromTokens(tokens) {
   const payload = decodeJwtPayload(tokens?.access_token)
   return firstWorkspaceId(tokens)
     || firstWorkspaceId(payload)
-    || firstIdentityId(tokens)
-    || firstIdentityId(payload)
 }
 
 async function ensureClientId() {
@@ -357,7 +324,7 @@ export function getHFWorkspaceId() {
   const stored = safeStorageGet(HF_WORKSPACE_KEY)
   if (stored) return stored
   const payload = decodeJwtPayload(getHFToken())
-  const fromToken = firstWorkspaceId(payload) || firstIdentityId(payload)
+  const fromToken = firstWorkspaceId(payload)
   safeStorageSet(HF_WORKSPACE_KEY, fromToken)
   return fromToken
 }
@@ -375,7 +342,7 @@ async function fetchWorkspaceCandidate(url, token) {
 }
 
 function workspaceIdFromDiscoveryData(data) {
-  return firstWorkspaceId(data) || firstIdentityId(data)
+  return firstWorkspaceId(data)
 }
 
 async function discoverHFWorkspaceId(token) {
@@ -404,9 +371,111 @@ export async function ensureHFWorkspaceId({ refresh = false } = {}) {
   const payload = decodeJwtPayload(token)
   const discovered = await discoverHFWorkspaceId(token)
     || firstWorkspaceId(payload)
-    || firstIdentityId(payload)
   safeStorageSet(HF_WORKSPACE_KEY, discovered)
   return discovered
+}
+
+function parseMaybeJson(text) {
+  if (!text) return null
+  try { return JSON.parse(text) } catch { return text }
+}
+
+function endpointLabel(url) {
+  const raw = String(url || '')
+  if (raw.startsWith(AUTH_PROXY)) return `OAuth ${raw.slice(AUTH_PROXY.length) || '/'}`
+  if (raw.startsWith(FNF_PROXY)) return `FNF ${raw.slice(FNF_PROXY.length) || '/'}`
+  return raw
+}
+
+function summarizeDiscoveryData(data) {
+  if (data == null || data === '') return 'Empty response body.'
+  if (typeof data === 'string') return `Text response (${data.slice(0, 80) || 'empty'}).`
+  if (Array.isArray(data)) {
+    const found = workspaceIdFromDiscoveryData(data)
+    return `${data.length} item array${found ? ' with a workspace field' : ' with no workspace field'}.`
+  }
+  if (typeof data !== 'object') return `${typeof data} response.`
+  const keys = Object.keys(data)
+    .filter(key => !SENSITIVE_KEY_RE.test(key))
+    .slice(0, 10)
+  const keyText = keys.length ? keys.join(', ') : 'no public keys'
+  return `${workspaceIdFromDiscoveryData(data) ? 'Workspace field found' : 'No workspace field found'}; keys: ${keyText}.`
+}
+
+async function fetchWorkspaceDiagnostic(url, token) {
+  const startedAt = Date.now()
+  try {
+    const res = await fetchWithRetry(url, {
+      headers: { Accept: 'application/json', Authorization: `Bearer ${token}` },
+    }, { attempts: 2, perAttemptTimeoutMs: 10000 })
+    const text = await res.text().catch(() => '')
+    const data = parseMaybeJson(text)
+    return {
+      path: endpointLabel(url),
+      ok: res.ok,
+      status: res.status,
+      workspaceId: res.ok ? workspaceIdFromDiscoveryData(data) : '',
+      summary: res.ok ? summarizeDiscoveryData(data) : String(text || res.statusText || 'Request failed').slice(0, 180),
+      durationMs: Date.now() - startedAt,
+    }
+  } catch (error) {
+    return {
+      path: endpointLabel(url),
+      ok: false,
+      status: 'network',
+      workspaceId: '',
+      summary: error?.message || 'Network error while checking this endpoint.',
+      durationMs: Date.now() - startedAt,
+    }
+  }
+}
+
+export async function diagnoseHFWorkspace() {
+  const token = getHFToken()
+  const savedWorkspaceId = safeStorageGet(HF_WORKSPACE_KEY)
+  const payload = decodeJwtPayload(token)
+  const tokenWorkspaceId = firstWorkspaceId(payload)
+  const checks = []
+  let detectedWorkspaceId = tokenWorkspaceId
+
+  if (!token) {
+    return {
+      connected: false,
+      savedWorkspaceId,
+      tokenWorkspaceId: '',
+      detectedWorkspaceId: '',
+      resolvedWorkspaceId: savedWorkspaceId,
+      workspaceSource: savedWorkspaceId ? 'manual' : 'missing',
+      checks,
+      status: 'not_connected',
+    }
+  }
+
+  for (const path of OAUTH_WORKSPACE_PATHS) {
+    const check = await fetchWorkspaceDiagnostic(`${AUTH_PROXY}${path}`, token)
+    checks.push(check)
+    if (!detectedWorkspaceId && check.workspaceId) detectedWorkspaceId = check.workspaceId
+  }
+
+  for (const path of FNF_WORKSPACE_PATHS) {
+    const check = await fetchWorkspaceDiagnostic(`${FNF_PROXY}${path}`, token)
+    checks.push(check)
+    if (!detectedWorkspaceId && check.workspaceId) detectedWorkspaceId = check.workspaceId
+  }
+
+  if (detectedWorkspaceId) safeStorageSet(HF_WORKSPACE_KEY, detectedWorkspaceId)
+
+  const resolvedWorkspaceId = detectedWorkspaceId || savedWorkspaceId
+  return {
+    connected: true,
+    savedWorkspaceId,
+    tokenWorkspaceId,
+    detectedWorkspaceId,
+    resolvedWorkspaceId,
+    workspaceSource: detectedWorkspaceId ? 'detected' : savedWorkspaceId ? 'manual_unverified' : 'missing',
+    checks,
+    status: detectedWorkspaceId ? 'detected' : savedWorkspaceId ? 'manual_unverified' : 'missing',
+  }
 }
 export function isHFConnected() { return !!getHFToken() }
 export function disconnectHF() {
@@ -467,7 +536,8 @@ export function fireReferralOnce() {
 
 export const __testing = {
   decodeJwtPayload,
-  firstIdentityId,
   firstWorkspaceId,
+  workspaceIdFromDiscoveryData,
   workspaceIdFromTokens,
+  summarizeDiscoveryData,
 }

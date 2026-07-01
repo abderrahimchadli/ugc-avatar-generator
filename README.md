@@ -2,8 +2,8 @@
 
 Avatar and product package studio for Vercel. The app creates named reusable
 packages, builds strong prompts, imports images from Google Flow or ChatGPT
-Image 2 through a Chrome extension, and uploads selected packages to a connected
-Higgsfield account.
+Image 2 through a Chrome extension, and prepares selected packages for a
+Higgsfield asset workflow.
 
 Full app report: https://ugc-avatar-generator-three.vercel.app/app-report.html
 
@@ -16,8 +16,8 @@ Full app report: https://ugc-avatar-generator-three.vercel.app/app-report.html
 - Imports selected generated images back into the correct package session.
 - Links extension imports to the account that opened the generation session, so
   saved images land in that user's package library.
-- Uploads selected package images to Higgsfield using the existing account
-  connection.
+- Includes an experimental Higgsfield connection and diagnostics for Marketing
+  Studio asset creation.
 - Supports Supabase Auth approval when configured, and local demo mode when not.
 
 ## Local setup
@@ -75,16 +75,18 @@ The extension:
 
 ## Higgsfield assets
 
-Connect Higgsfield in Settings, then open Library and click:
+Connect Higgsfield in Settings, run the workspace diagnostics, then open Library
+and click:
 
 ```text
 Create Higgsfield asset
 ```
 
-The app uploads the package images through Higgsfield's media endpoint, then
-creates a Marketing Studio avatar or product asset. The returned asset ID is
-saved on the package so the Library shows which packages have been sent to
-Higgsfield for reuse in ad and video workflows.
+This path is experimental. It only works if Higgsfield exposes a valid workspace
+ID through the connected account and returns a public image URL after upload.
+If either value is missing, the app now stops with a diagnostic message instead
+of claiming the asset was created. The next reliable path may need an official
+Higgsfield asset API or a browser-based Higgsfield upload bridge.
 
 ## Notes
 

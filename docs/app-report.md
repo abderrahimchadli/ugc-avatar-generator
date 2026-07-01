@@ -35,9 +35,9 @@ can be considered stable.
 - Shows a Library with search, grouping, sorting, recent images, storage
   estimate, image removal, and package-level Higgsfield asset status.
 - Connects to Higgsfield through OAuth.
-- Creates Higgsfield Marketing Studio assets from Library packages:
-  avatar packages become Marketing Studio avatars, and product packages become
-  Marketing Studio products.
+- Includes an experimental Higgsfield Marketing Studio asset flow with
+  workspace diagnostics. It is not yet proven as a reliable visible upload into
+  the Higgsfield website library.
 - Supports local demo users and Supabase-backed user approval when configured.
 - Runs on Vercel for testing.
 
@@ -54,6 +54,9 @@ Latest verified checks:
 - Vercel deployment: production alias is live.
 - Higgsfield FNF proxy route is deployed and protected; it returns auth errors
   without a valid Higgsfield token, which is expected.
+- The Higgsfield workspace/asset path is now treated as experimental because the
+  connected OAuth/API path may not expose the required workspace ID or public
+  image URL.
 
 ## Main Problem Still Needing Testing
 
@@ -70,13 +73,15 @@ tested from start to finish:
 4. Generate an image.
 5. Save that generated image back to the correct app account and package.
 6. Open Library.
-7. Create the Higgsfield Marketing Studio asset.
-8. Confirm that the asset appears and is usable inside the connected Higgsfield
+7. Run Higgsfield workspace diagnostics.
+8. Create the Higgsfield Marketing Studio asset if the diagnostics show a usable
+   workspace.
+9. Confirm that the asset appears and is usable inside the connected Higgsfield
    account.
 
-The final Higgsfield asset creation step was not live-tested because it creates
-an external asset in the user's Higgsfield account. That should only be tested
-with explicit approval and a real package image.
+The Higgsfield asset creation step is currently the main blocker. The app can
+connect through OAuth, but Marketing Studio creation depends on a workspace ID
+and a public image URL that may not be exposed by the private FNF endpoints.
 
 ## What Is Working
 
@@ -91,8 +96,8 @@ with explicit approval and a real package image.
 - Google Flow model preference defaults to Nano Banana Pro.
 - The old misleading "prepared Higgsfield reference" flow was replaced with
   the new "Create Higgsfield asset" flow.
-- The new Higgsfield path targets Marketing Studio assets, not hidden reference
-  media.
+- Higgsfield errors now explain missing workspace IDs and missing public image
+  URLs instead of reporting a false success.
 
 ## What Still Needs Live Testing
 
@@ -106,6 +111,8 @@ with explicit approval and a real package image.
 - Supabase account persistence after logout/login on production.
 - Image removal from local state and server state.
 - Higgsfield OAuth connection on production.
+- Whether Higgsfield exposes a workspace ID for the connected account.
+- Whether Higgsfield returns a public image URL after media upload.
 - Higgsfield Marketing Studio avatar creation with a real avatar package.
 - Higgsfield Marketing Studio product creation with a real product package.
 - Whether created Higgsfield assets appear exactly where expected in the
@@ -121,7 +128,8 @@ with explicit approval and a real package image.
 - Better admin screens for approving, blocking, and auditing users.
 - More visible asset history: created asset ID, date, type, selected images, and
   error logs.
-- Better retry and failure messages for Higgsfield asset creation.
+- A reliable Higgsfield upload strategy: official asset API support, a verified
+  workspace ID source, or a browser-based Higgsfield upload bridge.
 - A proper setup checklist for Supabase, Vercel, extension install, and
   Higgsfield connection.
 - Extension packaging/versioning so users know when they must update.

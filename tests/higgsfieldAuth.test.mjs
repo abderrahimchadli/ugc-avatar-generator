@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { __testing, ensureHFWorkspaceId, getHFWorkspaceId, setHFWorkspaceId } from '../src/utils/higgsfieldAuth.js'
+import { __testing, diagnoseHFWorkspace, ensureHFWorkspaceId, getHFWorkspaceId, setHFWorkspaceId } from '../src/utils/higgsfieldAuth.js'
 
 function jwtWithPayload(payload) {
   const encode = value => Buffer.from(JSON.stringify(value)).toString('base64url')
@@ -61,15 +61,25 @@ test('getHFWorkspaceId reads the token claim and caches it', () => {
   assert.equal(values.get('hf_workspace_id'), 'workspace_cached')
 })
 
-test('falls back to token subject when no workspace claim exists', () => {
+test('does not treat token identity claims as workspace ids', () => {
   const token = jwtWithPayload({
     sub: 'user_workspace_fallback',
+    user_id: 'user_123',
     email: 'creator@example.com',
   })
   const values = installLocalStorage({ hf_access_token: token })
 
-  assert.equal(getHFWorkspaceId(), 'user_workspace_fallback')
-  assert.equal(values.get('hf_workspace_id'), 'user_workspace_fallback')
+  assert.equal(__testing.workspaceIdFromTokens({ access_token: token }), '')
+  assert.equal(getHFWorkspaceId(), '')
+  assert.equal(values.has('hf_workspace_id'), false)
+})
+
+test('does not treat generic endpoint identity ids as workspace ids', () => {
+  assert.equal(__testing.workspaceIdFromDiscoveryData({
+    id: 'user_1',
+    account: { id: 'account_1' },
+    email: 'creator@example.com',
+  }), '')
 })
 
 test('discovers workspace id from OAuth userinfo when local token has none', async () => {
@@ -108,4 +118,20 @@ test('discovers workspace id from FNF workspace endpoints when OAuth userinfo ha
   assert.equal(values.get('hf_workspace_id'), 'workspace_from_fnf')
   assert.equal(calls.some(url => url.includes('/api/hf/oauth2/userinfo')), true)
   assert.equal(calls.some(url => url.includes('/api/fnf/developer/v1alpha/workspaces')), true)
+})
+
+test('diagnoses missing workspace without leaking identity fallback', async () => {
+  installLocalStorage({ hf_access_token: 'opaque-token' })
+  globalThis.fetch = async () => ({
+    ok: true,
+    status: 200,
+    text: async () => JSON.stringify({ id: 'user_1', email: 'creator@example.com' }),
+  })
+
+  const result = await diagnoseHFWorkspace()
+  assert.equal(result.connected, true)
+  assert.equal(result.detectedWorkspaceId, '')
+  assert.equal(result.status, 'missing')
+  assert.equal(result.checks.length > 0, true)
+  assert.equal(result.checks.every(check => !check.workspaceId), true)
 })

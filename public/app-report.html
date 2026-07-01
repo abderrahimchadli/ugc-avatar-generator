@@ -149,7 +149,7 @@
           <li>Keeps extension imports linked to the user who started the generation session.</li>
           <li>Shows a Library with search, grouping, sorting, recent images, storage estimate, image removal, and Higgsfield asset status.</li>
           <li>Connects to Higgsfield through OAuth.</li>
-          <li>Creates Higgsfield Marketing Studio assets from Library packages.</li>
+          <li>Includes an experimental Higgsfield Marketing Studio asset flow with workspace diagnostics.</li>
           <li>Supports local demo users and Supabase-backed user approval when configured.</li>
           <li>Runs on Vercel for testing.</li>
         </ul>
@@ -167,6 +167,7 @@
           <li>Production build: <code>npm run build</code> passes.</li>
           <li>Vercel deployment: production alias is live.</li>
           <li>Higgsfield FNF proxy route is deployed and protected.</li>
+          <li>Higgsfield asset creation is still experimental because the connected API path may not expose the required workspace ID or public image URL.</li>
         </ul>
       </section>
 
@@ -184,13 +185,14 @@
           <li>Generate an image.</li>
           <li>Save that generated image back to the correct app account and package.</li>
           <li>Open Library.</li>
-          <li>Create the Higgsfield Marketing Studio asset.</li>
+          <li>Run Higgsfield workspace diagnostics.</li>
+          <li>Create the Higgsfield Marketing Studio asset only if diagnostics show a usable workspace.</li>
           <li>Confirm that the asset appears and is usable inside the connected Higgsfield account.</li>
         </ol>
         <p>
-          The final Higgsfield asset creation step was not live-tested because it
-          creates an external asset in the user's Higgsfield account. That should
-          only be tested with explicit approval and a real package image.
+          The Higgsfield asset creation step is currently the main blocker. It depends
+          on a workspace ID and a public image URL that may not be exposed by the
+          private FNF endpoints.
         </p>
       </section>
 
@@ -206,7 +208,7 @@
             <li>Extension imports are guarded by user/package ownership.</li>
             <li>ChatGPT Images opens at <code>https://chatgpt.com/images</code>.</li>
             <li>Google Flow model preference defaults to Nano Banana Pro.</li>
-            <li>The old hidden reference upload was replaced by a Marketing Studio asset flow.</li>
+            <li>Higgsfield errors now explain missing workspace IDs and missing public image URLs instead of reporting a false success.</li>
           </ul>
         </section>
 
@@ -220,6 +222,8 @@
             <li>Supabase persistence after logout/login on production.</li>
             <li>Image removal from local state and server state.</li>
             <li>Higgsfield OAuth connection on production.</li>
+            <li>Whether Higgsfield exposes a workspace ID for the connected account.</li>
+            <li>Whether Higgsfield returns a public image URL after media upload.</li>
             <li>Marketing Studio avatar and product creation with real packages.</li>
             <li>Whether created Higgsfield assets appear where expected in the Higgsfield website.</li>
             <li>Multi-user testing where two people generate at the same time.</li>
@@ -234,7 +238,7 @@
           <li>Stronger production authentication and role management.</li>
           <li>Better admin screens for approving, blocking, and auditing users.</li>
           <li>More visible asset history: asset ID, date, type, selected images, and error logs.</li>
-          <li>Better retry and failure messages for Higgsfield asset creation.</li>
+          <li>A reliable Higgsfield upload strategy: official asset API support, a verified workspace ID source, or a browser-based Higgsfield upload bridge.</li>
           <li>A setup checklist for Supabase, Vercel, extension install, and Higgsfield connection.</li>
           <li>Extension packaging and versioning so users know when they must update.</li>
           <li>Full browser E2E tests for the app and extension.</li>

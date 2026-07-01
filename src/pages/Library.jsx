@@ -1,5 +1,9 @@
 import { isHFConnected } from '../utils/higgsfieldAuth'
-import { HIGGSFIELD_ASSET_NOTE, createPackageMarketingAsset } from '../utils/higgsfieldMarketingAssets'
+import {
+  HIGGSFIELD_ASSET_NOTE,
+  createPackageMarketingAsset,
+  selectPackageImagesForMarketingAsset,
+} from '../utils/higgsfieldMarketingAssets'
 import { usePackages } from '../context/packageStore'
 import { formatBytes } from '../utils/promptPresets'
 import { useMemo, useState } from 'react'
@@ -9,6 +13,16 @@ import {
   packageUpdatedAt,
   sortPackagesForLibrary,
 } from '../utils/libraryView'
+
+function higgsfieldProgressMessage(pack, progress) {
+  if (progress?.phase === 'upload') {
+    return `Uploading ${progress.index} of ${progress.total} selected images from "${pack.name}" to Higgsfield media.`
+  }
+  if (progress?.phase === 'asset') {
+    return `Creating the Higgsfield Marketing Studio asset for "${pack.name}".`
+  }
+  return `Preparing "${pack.name}" for Higgsfield.`
+}
 
 export default function Library() {
   const { packages, updatePackage, removePackageItem, storageStats, serverStatus, hasServerStorage } = usePackages()
@@ -26,12 +40,20 @@ export default function Library() {
   async function upload(pack) {
     setMessage('')
     if (!isHFConnected()) {
-      setMessage('Connect Higgsfield in Settings first.')
+      setMessage('Connect Higgsfield in Settings first. A normal Higgsfield website login in Chrome is separate from this app connection.')
+      return
+    }
+    const selectedItems = selectPackageImagesForMarketingAsset(pack)
+    if (!selectedItems.length) {
+      setMessage(`"${pack.name}" has no saved images yet. Save images from the extension before creating a Higgsfield asset.`)
       return
     }
     setUploading(pack.id)
     try {
-      const asset = await createPackageMarketingAsset(pack)
+      setMessage(`Preparing ${selectedItems.length} selected image${selectedItems.length === 1 ? '' : 's'} from "${pack.name}".`)
+      const asset = await createPackageMarketingAsset(pack, progress => {
+        setMessage(higgsfieldProgressMessage(pack, progress))
+      })
       updatePackage(pack.id, {
         higgsfieldAsset: asset,
       })
@@ -116,6 +138,9 @@ export default function Library() {
                 </div>
               ))}
             </div>
+            {!(pack.items || []).length && (
+              <p className="muted">No saved images in this package yet. Import generated images from the extension first.</p>
+            )}
             <button className="primary-btn full" onClick={() => upload(pack)} disabled={uploading === pack.id || !(pack.items || []).length}>
               {uploading === pack.id
                 ? 'Creating asset...'
