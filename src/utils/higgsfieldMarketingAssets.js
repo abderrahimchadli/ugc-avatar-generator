@@ -1,13 +1,14 @@
-import { ensureHFWorkspaceId, getHFToken, refreshHFToken } from './higgsfieldAuth.js'
+import { getHFToken } from './higgsfieldAuth.js'
+import {
+  callHiggsfieldTool,
+  initSession,
+  uploadMediaDetails,
+  unwrapHiggsfieldMCP,
+} from './higgsfieldGenerate.js'
 
-const FNF_PROXY = '/api/fnf'
 const MAX_PRODUCT_IMAGES = 8
 
 export const HIGGSFIELD_ASSET_NOTE = 'Created as a Higgsfield Marketing Studio asset for reuse in Higgsfield ad and video workflows.'
-
-function sleep(ms) {
-  return new Promise(resolve => setTimeout(resolve, ms))
-}
 
 function safeName(value, fallback = 'package') {
   const cleaned = String(value || fallback)
@@ -22,11 +23,6 @@ function contentTypeToExt(contentType) {
   if (/webp/i.test(contentType)) return 'webp'
   if (/gif/i.test(contentType)) return 'gif'
   return 'jpg'
-}
-
-function parseResponseText(text) {
-  if (!text) return null
-  try { return JSON.parse(text) } catch { return text }
 }
 
 function formatApiErrorValue(value) {
@@ -64,85 +60,6 @@ function readableApiError(status, data, fallback = '') {
       || fallback
   const suffix = text ? `: ${String(text).slice(0, 240)}` : ''
   return `Higgsfield asset API error ${status}${suffix}`
-}
-
-function makeApiError(status, data, fallback = '') {
-  const error = new Error(readableApiError(status, data, fallback))
-  error.status = status
-  error.data = data
-  return error
-}
-
-async function fnfRequest(path, { method = 'GET', body = null, headers = {} } = {}, isRetry = false) {
-  const token = getHFToken()
-  if (!token) {
-    throw new Error('Connect Higgsfield in Settings first. A Higgsfield website login in Chrome does not give this app an API token.')
-  }
-  const workspaceId = await ensureHFWorkspaceId()
-  if (!workspaceId) {
-    throw new Error('Higgsfield did not expose a workspace ID through the connected account. Open Settings and run Higgsfield diagnostics. This Marketing Studio API path may not be available for your account yet.')
-  }
-  const requestHeaders = {
-    Accept: 'application/json',
-    Authorization: `Bearer ${token}`,
-    'X-Fnf-Workspace-Id': workspaceId,
-    ...headers,
-  }
-  let requestBody = body
-  if (body && !(body instanceof Blob) && typeof body !== 'string') {
-    requestHeaders['Content-Type'] = requestHeaders['Content-Type'] || 'application/json'
-    requestBody = JSON.stringify(body)
-  }
-
-  const res = await fetch(`${FNF_PROXY}${path}`, {
-    method,
-    headers: requestHeaders,
-    body: requestBody,
-  })
-
-  if (res.status === 401 && !isRetry) {
-    await refreshHFToken()
-    return fnfRequest(path, { method, body, headers }, true)
-  }
-
-  const text = await res.text().catch(() => '')
-  const data = parseResponseText(text)
-  if (!res.ok) throw makeApiError(res.status, data, text)
-  return data
-}
-
-async function postFirstSuccessful(candidates) {
-  let lastError = null
-  for (const candidate of candidates) {
-    try {
-      return await fnfRequest(candidate.path, {
-        method: candidate.method || 'POST',
-        body: candidate.body,
-      })
-    } catch (error) {
-      lastError = error
-      if (![400, 404, 415, 422].includes(error.status)) throw error
-    }
-  }
-  throw lastError || new Error('Higgsfield asset request failed.')
-}
-
-function extractUploadSlot(data) {
-  const slot = Array.isArray(data)
-    ? data[0]
-    : data?.upload || data?.media || data?.slot || data?.data || data
-  const id = slot?.id || slot?.media_id || slot?.mediaId || data?.id
-  const uploadUrl = slot?.upload_url || slot?.uploadUrl || slot?.signed_url || slot?.signedUrl
-    || slot?.put_url || slot?.putUrl || slot?.presigned_url || slot?.presignedUrl
-    || data?.upload_url || data?.uploadUrl || slot?.url
-  if (!id || !uploadUrl) {
-    throw new Error('Higgsfield did not return a usable upload slot.')
-  }
-  return {
-    id,
-    uploadUrl,
-    publicUrl: findPublicMediaUrl(slot) || findPublicMediaUrl(data),
-  }
 }
 
 function looksLikePublicMediaUrl(value) {
@@ -191,80 +108,22 @@ function findPublicMediaUrl(value, seen = new WeakSet()) {
   return ''
 }
 
-function mediaStatus(data) {
-  return String(data?.status || data?.media?.status || data?.data?.status || '').toLowerCase()
-}
-
-async function createFnfUpload({ filename, contentType, length, type = 'image' }) {
-  const query = new URLSearchParams({ type })
-  const fullQuery = new URLSearchParams({
-    type,
-    filename,
-    content_type: contentType,
-    length: String(length),
-  })
-
-  const data = await postFirstSuccessful([
-    {
-      path: `/developer/v2alpha/media?${query}`,
-      body: { filename, content_type: contentType, length },
-    },
-    {
-      path: '/developer/v2alpha/media',
-      body: { type, filename, content_type: contentType, length },
-    },
-    {
-      path: `/developer/v2alpha/media?${fullQuery}`,
-      body: null,
-    },
-  ])
-  return extractUploadSlot(data)
-}
-
-async function confirmFnfUpload(id, type = 'image') {
-  let lastData = null
-  for (let attempt = 0; attempt < 6; attempt += 1) {
-    const query = new URLSearchParams({ type })
-    const data = await postFirstSuccessful([
-      { path: `/developer/v2alpha/media/${encodeURIComponent(id)}/confirm?${query}`, body: null },
-      { path: `/developer/v2alpha/media/${encodeURIComponent(id)}/confirm`, body: { type } },
-    ])
-    lastData = data
-    const status = mediaStatus(data)
-    if (!status || /completed|complete|ready|usable|succeeded|success/.test(status)) return data
-    await sleep(500 + attempt * 250)
-  }
-  const status = mediaStatus(lastData) || 'unknown'
-  throw new Error(`Uploaded media ${id} is not usable yet (status ${status}).`)
-}
-
 export async function uploadMarketingImage(dataUrl, { packageName = 'package', index = 1 } = {}) {
-  const res = await fetch(dataUrl)
-  if (!res.ok) throw new Error(`Could not read package image (${res.status}).`)
-  const blob = await res.blob()
-  const contentType = blob.type || 'image/jpeg'
-  const filename = `${safeName(packageName)}_${index}.${contentTypeToExt(contentType)}`
-  const slot = await createFnfUpload({
-    filename,
-    contentType,
-    length: blob.size,
+  if (!getHFToken()) {
+    throw new Error('Connect Higgsfield in Settings first. A Higgsfield website login in Chrome does not give this app an API token.')
+  }
+  const details = await uploadMediaDetails(dataUrl, {
     type: 'image',
+    defaultContentType: 'image/jpeg',
+    getExt: contentTypeToExt,
+    prefix: `${safeName(packageName)}_${index}`,
   })
-  const putRes = await fetch(slot.uploadUrl, {
-    method: 'PUT',
-    body: blob,
-    headers: { 'Content-Type': contentType },
-  })
-  if (!putRes.ok) throw new Error(`Higgsfield image upload failed: ${putRes.status}`)
-  const confirmation = await confirmFnfUpload(slot.id, 'image')
-  const publicUrl = findPublicMediaUrl(confirmation) || slot.publicUrl
   return {
-    id: slot.id,
-    uploadUrl: slot.uploadUrl,
-    publicUrl,
-    contentType,
-    sizeBytes: blob.size,
-    confirmation,
+    id: details.id,
+    publicUrl: details.publicUrl || '',
+    contentType: details.contentType || 'image/jpeg',
+    sizeBytes: details.sizeBytes || 0,
+    confirmation: details,
   }
 }
 
@@ -291,30 +150,95 @@ export function buildMarketingAssetRequestCandidates(pack, uploadsOrIds) {
   const description = String(pack?.notes || pack?.identityLock || pack?.styleLock || '').trim()
   if (pack?.type === 'product') {
     return [
-      { path: '/developer/v1alpha/marketing-studio/products', body: { title: name, description, image: uploadIds } },
-      { path: '/developer/v1alpha/marketing-studio/products', body: { title: name, description, images: uploadIds } },
-      { path: '/developer/v1alpha/marketing-studio/products', body: { title: name, description, image_ids: uploadIds } },
+      { tool: 'show_marketing_studio', args: { action: 'create', type: 'product', title: name, description, medias: uploadIds } },
+      { tool: 'show_marketing_studio', args: { action: 'create', type: 'product', title: name, description, images: uploadIds } },
+      { tool: 'show_marketing_studio', args: { action: 'create', type: 'product', title: name, description, image: uploadIds } },
     ]
   }
   const image = uploads[0]
   const imageId = image?.id
   const imageUrl = image?.publicUrl || image?.url || ''
   const withImageUrl = imageUrl ? [
-    { path: '/developer/v1alpha/marketing-studio/avatars', body: { name, image: imageId, image_url: imageUrl } },
-    { path: '/developer/v1alpha/marketing-studio/avatars', body: { name, image_id: imageId, image_url: imageUrl } },
-    { path: '/developer/v1alpha/marketing-studio/avatars', body: { name, image: imageId, imageUrl } },
+    { tool: 'show_marketing_studio', args: { action: 'create', type: 'avatar', name, image: imageId, image_url: imageUrl } },
+    { tool: 'show_marketing_studio', args: { action: 'create', type: 'avatar', name, image_id: imageId, image_url: imageUrl } },
+    { tool: 'show_marketing_studio', args: { action: 'create', type: 'avatar', name, medias: [imageId], image_url: imageUrl } },
   ] : []
   return [
     ...withImageUrl,
-    { path: '/developer/v1alpha/marketing-studio/avatars', body: { name, image: imageId } },
-    { path: '/developer/v1alpha/marketing-studio/avatars', body: { name, image_id: imageId } },
-    { path: '/developer/v1alpha/marketing-studio/avatars', body: { name, images: [imageId] } },
+    { tool: 'show_marketing_studio', args: { action: 'create', type: 'avatar', name, image: imageId } },
+    { tool: 'show_marketing_studio', args: { action: 'create', type: 'avatar', name, image_id: imageId } },
+    { tool: 'show_marketing_studio', args: { action: 'create', type: 'avatar', name, medias: [imageId] } },
   ]
+}
+
+function extractAssetId(value, seen = new WeakSet()) {
+  if (!value) return ''
+  if (typeof value === 'string') {
+    const uuid = value.match(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i)
+    return uuid?.[0] || ''
+  }
+  if (typeof value !== 'object') return ''
+  if (seen.has(value)) return ''
+  seen.add(value)
+
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      const found = extractAssetId(item, seen)
+      if (found) return found
+    }
+    return ''
+  }
+
+  for (const key of ['id', 'uuid', 'asset_id', 'assetId', 'product_id', 'productId', 'avatar_id', 'avatarId']) {
+    const candidate = value[key]
+    if (typeof candidate === 'string' && candidate.trim()) return candidate.trim()
+  }
+
+  for (const key of ['data', 'result', 'results', 'asset', 'avatar', 'product', 'item']) {
+    const found = extractAssetId(value[key], seen)
+    if (found) return found
+  }
+
+  for (const nested of Object.values(value)) {
+    const found = extractAssetId(nested, seen)
+    if (found) return found
+  }
+  return ''
+}
+
+function mcpErrorText(result, data) {
+  if (result?.isError) {
+    const text = result.content?.map(item => item.text).filter(Boolean).join('; ')
+    return text || 'Higgsfield returned an MCP error.'
+  }
+  if (data?.error) return typeof data.error === 'string' ? data.error : formatApiErrorValue(data.error)
+  if (data?.detail) return formatApiErrorValue(data.detail)
+  return ''
+}
+
+async function callFirstMarketingStudioCandidate(candidates) {
+  await initSession()
+  let lastError = null
+  for (const candidate of candidates) {
+    try {
+      const result = await callHiggsfieldTool(candidate.tool, candidate.args)
+      const data = unwrapHiggsfieldMCP(result)
+      const errorText = mcpErrorText(result, data)
+      if (errorText) throw new Error(errorText)
+      const id = extractAssetId(data)
+      if (!id) throw new Error(`Higgsfield did not return a Marketing Studio asset id. Response: ${JSON.stringify(data)?.slice(0, 220)}`)
+      return { data, id }
+    } catch (error) {
+      lastError = error
+      if (!/unknown tool|invalid|missing|required|not found|validation|field/i.test(error.message || '')) throw error
+    }
+  }
+  throw lastError || new Error('Higgsfield Marketing Studio asset request failed.')
 }
 
 function normalizeCreatedAsset(pack, data, uploads, selectedItems) {
   const root = data?.data || data?.avatar || data?.product || data
-  const id = root?.id || data?.id || data?.uuid || data?.product_id || data?.avatar_id
+  const id = extractAssetId(root) || extractAssetId(data)
   if (!id) throw new Error('Higgsfield created the asset but did not return an asset id.')
   return {
     id,
@@ -342,16 +266,13 @@ export async function createPackageMarketingAsset(pack, onProgress) {
     }))
   }
 
-  if (pack.type !== 'product' && !uploads[0]?.publicUrl) {
-    throw new Error('Higgsfield accepted the image upload but did not return the public image URL required for Marketing Studio avatar creation. The current private Higgsfield API path is not enough; use Settings diagnostics or a Higgsfield browser upload bridge.')
-  }
-
   onProgress?.({ phase: 'asset', index: uploads.length, total: uploads.length })
-  const data = await postFirstSuccessful(buildMarketingAssetRequestCandidates(pack, uploads))
+  const { data } = await callFirstMarketingStudioCandidate(buildMarketingAssetRequestCandidates(pack, uploads))
   return normalizeCreatedAsset(pack, data, uploads, selectedItems)
 }
 
 export const __testing = {
+  extractAssetId,
   readableApiError,
   findPublicMediaUrl,
 }

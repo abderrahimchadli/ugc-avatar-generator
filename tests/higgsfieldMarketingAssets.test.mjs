@@ -58,11 +58,13 @@ test('builds Marketing Studio product create candidates with uploaded image ids'
     [{ id: 'up_1', publicUrl: 'https://cdn.example.com/up_1.png' }, { id: 'up_2' }]
   )
 
-  assert.equal(primary.path, '/developer/v1alpha/marketing-studio/products')
-  assert.deepEqual(primary.body, {
+  assert.equal(primary.tool, 'show_marketing_studio')
+  assert.deepEqual(primary.args, {
+    action: 'create',
+    type: 'product',
     title: 'Glow Serum',
     description: 'Glass bottle',
-    image: ['up_1', 'up_2'],
+    medias: ['up_1', 'up_2'],
   })
 })
 
@@ -72,8 +74,10 @@ test('builds Marketing Studio avatar create candidates with upload id and public
     [{ id: 'up_avatar', publicUrl: 'https://cdn.example.com/avatar.png' }]
   )
 
-  assert.equal(primary.path, '/developer/v1alpha/marketing-studio/avatars')
-  assert.deepEqual(primary.body, {
+  assert.equal(primary.tool, 'show_marketing_studio')
+  assert.deepEqual(primary.args, {
+    action: 'create',
+    type: 'avatar',
     name: 'Camila',
     image: 'up_avatar',
     image_url: 'https://cdn.example.com/avatar.png',
@@ -86,7 +90,9 @@ test('keeps avatar upload id fallback when no public URL is available', () => {
     ['up_avatar']
   )
 
-  assert.deepEqual(candidates[0].body, {
+  assert.deepEqual(candidates[0].args, {
+    action: 'create',
+    type: 'avatar',
     name: 'Camila',
     image: 'up_avatar',
   })
@@ -110,10 +116,9 @@ test('extracts public media URLs while ignoring signed upload URLs', () => {
   assert.equal(publicUrl, 'https://d8j0ntlcm91z4.cloudfront.net/user/file.webp')
 })
 
-test('stops avatar asset creation when Higgsfield upload returns no public image URL', async () => {
+test('creates avatar assets through MCP without requiring a workspace id', async () => {
   installLocalStorage({
     hf_access_token: 'token_1',
-    hf_workspace_id: 'workspace_1',
   })
   const calls = []
   globalThis.fetch = async (url, options = {}) => {
@@ -128,31 +133,76 @@ test('stops avatar asset creation when Higgsfield upload returns no public image
     if (href.startsWith('https://upload.example.com')) {
       return { ok: true, status: 200 }
     }
-    if (href.includes('/confirm')) {
-      return {
-        ok: true,
-        status: 200,
-        text: async () => JSON.stringify({ id: 'media_1', status: 'complete' }),
+    if (href === '/api/hf/mcp') {
+      const body = JSON.parse(options.body)
+      if (body.method === 'initialize') {
+        return {
+          ok: true,
+          status: 200,
+          headers: { get: name => name.toLowerCase() === 'mcp-session-id' ? 'session_1' : 'application/json' },
+          text: async () => JSON.stringify({ jsonrpc: '2.0', id: body.id, result: {} }),
+        }
+      }
+      if (body.method === 'tools/call' && body.params.name === 'media_upload') {
+        return {
+          ok: true,
+          status: 200,
+          headers: { get: () => 'application/json' },
+          text: async () => JSON.stringify({
+            jsonrpc: '2.0',
+            id: body.id,
+            result: { content: [{ text: JSON.stringify({ media_id: 'media_1', upload_url: 'https://upload.example.com/file?X-Amz-Signature=abc' }) }] },
+          }),
+        }
+      }
+      if (body.method === 'tools/call' && body.params.name === 'media_confirm') {
+        return {
+          ok: true,
+          status: 200,
+          headers: { get: () => 'application/json' },
+          text: async () => JSON.stringify({
+            jsonrpc: '2.0',
+            id: body.id,
+            result: { content: [{ text: JSON.stringify({ id: 'media_1', url: 'https://cdn.example.com/media_1.png' }) }] },
+          }),
+        }
+      }
+      if (body.method === 'tools/call' && body.params.name === 'show_marketing_studio') {
+        assert.equal(body.params.arguments.action, 'create')
+        assert.equal(body.params.arguments.type, 'avatar')
+        assert.equal(body.params.arguments.image, 'media_1')
+        assert.equal(body.params.arguments.image_url, 'https://cdn.example.com/media_1.png')
+        return {
+          ok: true,
+          status: 200,
+          headers: { get: () => 'application/json' },
+          text: async () => JSON.stringify({
+            jsonrpc: '2.0',
+            id: body.id,
+            result: { content: [{ text: JSON.stringify({ id: 'avatar_1', name: 'No Workspace Needed' }) }] },
+          }),
+        }
       }
     }
-    assert.equal(options.headers['X-Fnf-Workspace-Id'], 'workspace_1')
     return {
-      ok: true,
-      status: 200,
-      text: async () => JSON.stringify({
-        id: 'media_1',
-        upload_url: 'https://upload.example.com/file?X-Amz-Signature=abc',
-      }),
+      ok: false,
+      status: 404,
+      headers: { get: () => 'application/json' },
+      text: async () => 'unexpected request',
     }
   }
 
-  await assert.rejects(
-    () => createPackageMarketingAsset({
-      type: 'avatar',
-      name: 'No Public Url',
-      items: [{ id: 'hero', mode: 'main_portrait', url: 'data:image/png;base64,abcd' }],
-    }),
-    /did not return the public image URL/
-  )
-  assert.equal(calls.some(url => url.includes('/marketing-studio/avatars')), false)
+  const asset = await createPackageMarketingAsset({
+    type: 'avatar',
+    name: 'No Workspace Needed',
+    items: [{ id: 'hero', mode: 'main_portrait', url: 'data:image/png;base64,abcd' }],
+  })
+
+  assert.equal(asset.id, 'avatar_1')
+  assert.equal(calls.some(url => url.includes('/api/fnf')), false)
+})
+
+test('extracts nested Higgsfield asset ids', () => {
+  assert.equal(__testing.extractAssetId({ data: { product: { id: 'product_1' } } }), 'product_1')
+  assert.equal(__testing.extractAssetId('created 11111111-2222-3333-4444-555555555555'), '11111111-2222-3333-4444-555555555555')
 })

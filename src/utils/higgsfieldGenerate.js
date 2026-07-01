@@ -1,4 +1,4 @@
-import { getHFToken, refreshHFToken, disconnectHF } from './higgsfieldAuth'
+import { getHFToken, refreshHFToken, disconnectHF } from './higgsfieldAuth.js'
 
 const MCP_URL = '/api/hf/mcp'
 const PENDING_KEY = 'hf_pending_gens'
@@ -264,6 +264,10 @@ async function callTool(name, args, isRetry = false) {
   return result
 }
 
+export async function callHiggsfieldTool(name, args) {
+  return callTool(name, args)
+}
+
 function unwrapMCP(result) {
   if (!result?.content) return result
   for (const item of result.content) {
@@ -272,6 +276,22 @@ function unwrapMCP(result) {
     }
   }
   return result
+}
+
+export function unwrapHiggsfieldMCP(result) {
+  return unwrapMCP(result)
+}
+
+export async function listHiggsfieldTools() {
+  await initSession()
+  const res = await mcpPost({
+    jsonrpc: '2.0',
+    id: Date.now(),
+    method: 'tools/list',
+    params: {},
+  })
+  const data = res?.result ?? res
+  return data?.tools || unwrapMCP(data)?.tools || []
 }
 
 function extractJobIds(result) {
@@ -401,11 +421,14 @@ async function pollVideoJobs(jobIds, total, onProgress, onPartialResults, isCanc
 
 // Shared upload pipeline for any media kind. Caches by fingerprint so the same
 // data URL is never uploaded twice. Returns the CDN URL (or media_id as fallback).
-export async function uploadMedia(dataUrl, { type, defaultContentType, getExt, prefix }) {
+export async function uploadMediaDetails(dataUrl, { type, defaultContentType, getExt, prefix }) {
   const fp = mediaFingerprint(dataUrl)
   if (_mediaCache.has(fp)) {
     hflog(`[HF] media cache hit (${type}) — skipping upload`)
-    return _mediaCache.get(fp)
+    const cached = _mediaCache.get(fp)
+    return typeof cached === 'string'
+      ? { id: cached, publicUrl: /^https?:\/\//i.test(cached) ? cached : '' }
+      : cached
   }
 
   const res = await fetch(dataUrl)
@@ -442,16 +465,28 @@ export async function uploadMedia(dataUrl, { type, defaultContentType, getExt, p
   hflog('[HF] media_confirm raw:', JSON.stringify(confirmed)?.slice(0, 500))
 
   const cdnUrl = confirmed?.url || confirmed?.media_url || confirmed?.rawUrl || confirmed?.cdn_url
-  if (cdnUrl) { _mediaCache.set(fp, cdnUrl); _mediaCacheSave(); return cdnUrl }
+  if (cdnUrl) {
+    const details = { id: mediaId, publicUrl: cdnUrl, contentType, sizeBytes: blob.size }
+    _mediaCache.set(fp, details); _mediaCacheSave(); return details
+  }
 
   if (typeof confirmed === 'string') {
     const urlMatch = confirmed.match(/https:\/\/[^\s"'\\]+/)
-    if (urlMatch) { _mediaCache.set(fp, urlMatch[0]); _mediaCacheSave(); return urlMatch[0] }
+    if (urlMatch) {
+      const details = { id: mediaId, publicUrl: urlMatch[0], contentType, sizeBytes: blob.size }
+      _mediaCache.set(fp, details); _mediaCacheSave(); return details
+    }
   }
 
   const fallback = confirmed?.media_id || confirmed?.id || mediaId
-  _mediaCache.set(fp, fallback); _mediaCacheSave()
-  return fallback
+  const details = { id: fallback, publicUrl: '', contentType, sizeBytes: blob.size }
+  _mediaCache.set(fp, details); _mediaCacheSave()
+  return details
+}
+
+export async function uploadMedia(dataUrl, options) {
+  const details = await uploadMediaDetails(dataUrl, options)
+  return details.publicUrl || details.id
 }
 
 const uploadAudioFile = dataUrl => uploadMedia(dataUrl, {

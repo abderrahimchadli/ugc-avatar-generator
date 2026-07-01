@@ -35,9 +35,8 @@ can be considered stable.
 - Shows a Library with search, grouping, sorting, recent images, storage
   estimate, image removal, and package-level Higgsfield asset status.
 - Connects to Higgsfield through OAuth.
-- Includes an experimental Higgsfield Marketing Studio asset flow with
-  workspace diagnostics. It is not yet proven as a reliable visible upload into
-  the Higgsfield website library.
+- Includes an experimental Higgsfield Marketing Studio asset flow that now uses
+  MCP tools instead of the old workspace-header FNF route.
 - Supports local demo users and Supabase-backed user approval when configured.
 - Runs on Vercel for testing.
 
@@ -52,11 +51,10 @@ Latest verified checks:
 - Unit and integration tests: `npm test` passes.
 - Production build: `npm run build` passes.
 - Vercel deployment: production alias is live.
-- Higgsfield FNF proxy route is deployed and protected; it returns auth errors
-  without a valid Higgsfield token, which is expected.
-- The Higgsfield workspace/asset path is now treated as experimental because the
-  connected OAuth/API path may not expose the required workspace ID or public
-  image URL.
+- Higgsfield MCP proxy route is deployed and protected; it requires a valid
+  Higgsfield token.
+- The Higgsfield asset path is still experimental, but no longer requires a
+  workspace ID when MCP tools are available.
 
 ## Main Problem Still Needing Testing
 
@@ -73,15 +71,16 @@ tested from start to finish:
 4. Generate an image.
 5. Save that generated image back to the correct app account and package.
 6. Open Library.
-7. Run Higgsfield workspace diagnostics.
-8. Create the Higgsfield Marketing Studio asset if the diagnostics show a usable
-   workspace.
+7. Run Higgsfield MCP tools diagnostics.
+8. Create the Higgsfield Marketing Studio asset if MCP exposes the required
+   media and Marketing Studio tools.
 9. Confirm that the asset appears and is usable inside the connected Higgsfield
    account.
 
 The Higgsfield asset creation step is currently the main blocker. The app can
-connect through OAuth, but Marketing Studio creation depends on a workspace ID
-and a public image URL that may not be exposed by the private FNF endpoints.
+connect through OAuth, but Marketing Studio creation depends on Higgsfield MCP
+exposing `media_upload`, `media_confirm`, and `show_marketing_studio` for the
+connected account.
 
 ## What Is Working
 
@@ -96,8 +95,8 @@ and a public image URL that may not be exposed by the private FNF endpoints.
 - Google Flow model preference defaults to Nano Banana Pro.
 - The old misleading "prepared Higgsfield reference" flow was replaced with
   the new "Create Higgsfield asset" flow.
-- Higgsfield errors now explain missing workspace IDs and missing public image
-  URLs instead of reporting a false success.
+- Higgsfield package asset creation no longer depends on a workspace ID; it uses
+  MCP media upload and Marketing Studio tools.
 
 ## What Still Needs Live Testing
 
@@ -111,8 +110,9 @@ and a public image URL that may not be exposed by the private FNF endpoints.
 - Supabase account persistence after logout/login on production.
 - Image removal from local state and server state.
 - Higgsfield OAuth connection on production.
-- Whether Higgsfield exposes a workspace ID for the connected account.
-- Whether Higgsfield returns a public image URL after media upload.
+- Whether Higgsfield exposes the required MCP tools for the connected account.
+- Whether `show_marketing_studio` creates visible avatar/product assets in the
+  Higgsfield website library.
 - Higgsfield Marketing Studio avatar creation with a real avatar package.
 - Higgsfield Marketing Studio product creation with a real product package.
 - Whether created Higgsfield assets appear exactly where expected in the
@@ -128,8 +128,9 @@ and a public image URL that may not be exposed by the private FNF endpoints.
 - Better admin screens for approving, blocking, and auditing users.
 - More visible asset history: created asset ID, date, type, selected images, and
   error logs.
-- A reliable Higgsfield upload strategy: official asset API support, a verified
-  workspace ID source, or a browser-based Higgsfield upload bridge.
+- A verified Higgsfield upload strategy for production: MCP Marketing Studio
+  tools first, browser-based Higgsfield upload bridge only if MCP cannot create
+  visible website-library assets.
 - A proper setup checklist for Supabase, Vercel, extension install, and
   Higgsfield connection.
 - Extension packaging/versioning so users know when they must update.

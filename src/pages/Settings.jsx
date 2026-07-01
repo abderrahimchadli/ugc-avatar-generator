@@ -11,6 +11,7 @@ import {
 } from '../utils/higgsfieldAuth'
 import { useAuth } from '../context/auth'
 import { usePackages } from '../context/packageStore'
+import { listHiggsfieldTools } from '../utils/higgsfieldGenerate'
 import { formatBytes } from '../utils/promptPresets'
 
 function shortId(value) {
@@ -28,7 +29,7 @@ function diagnosticMessage(result) {
   if (result.savedWorkspaceId) {
     return 'Using a saved manual workspace ID, but Higgsfield did not confirm it through the checked endpoints.'
   }
-  return 'No workspace ID was exposed by Higgsfield OAuth or FNF workspace endpoints. Manual paste only helps if Higgsfield support or API documentation gives you that ID.'
+  return 'No workspace ID was exposed by the old FNF endpoints. That is OK if your account uses Higgsfield MCP; Library will use the MCP Marketing Studio route instead of a workspace header.'
 }
 
 export default function Settings() {
@@ -42,6 +43,7 @@ export default function Settings() {
   const [workspaceLoading, setWorkspaceLoading] = useState(false)
   const [workspaceMessage, setWorkspaceMessage] = useState('')
   const [workspaceDiagnostics, setWorkspaceDiagnostics] = useState(null)
+  const [mcpDiagnostics, setMcpDiagnostics] = useState(null)
 
   useEffect(() => {
     const params = new URLSearchParams(location.search)
@@ -74,6 +76,7 @@ export default function Settings() {
     setWorkspaceIdValue('')
     setWorkspaceInput('')
     setWorkspaceMessage('')
+    setMcpDiagnostics(null)
   }
 
   function saveWorkspace(event) {
@@ -89,6 +92,7 @@ export default function Settings() {
       setWorkspaceMessage('Higgsfield workspace saved.')
     }
     setWorkspaceDiagnostics(null)
+    setMcpDiagnostics(null)
   }
 
   async function runWorkspaceDiagnostics() {
@@ -124,6 +128,37 @@ export default function Settings() {
     await runWorkspaceDiagnostics()
   }
 
+  async function runMcpDiagnostics() {
+    if (!hfConnected) {
+      setMcpDiagnostics({ ok: false, message: 'Connect Higgsfield first to inspect MCP tools.', tools: [] })
+      return
+    }
+    setWorkspaceLoading(true)
+    setMcpDiagnostics({ ok: true, message: 'Checking Higgsfield MCP tools...', tools: [] })
+    try {
+      const tools = await listHiggsfieldTools()
+      const useful = tools
+        .map(tool => ({
+          name: tool.name,
+          description: String(tool.description || '').slice(0, 160),
+        }))
+        .filter(tool => /marketing|studio|media|generate|job/i.test(`${tool.name} ${tool.description}`))
+      const hasMarketingStudio = useful.some(tool => tool.name === 'show_marketing_studio')
+      const hasMediaUpload = useful.some(tool => tool.name === 'media_upload')
+      setMcpDiagnostics({
+        ok: hasMarketingStudio && hasMediaUpload,
+        message: hasMarketingStudio && hasMediaUpload
+          ? 'MCP is ready for media upload and Marketing Studio asset creation. No workspace ID is needed for this route.'
+          : 'MCP is connected, but required Marketing Studio tools were not found for this account.',
+        tools: useful,
+      })
+    } catch (error) {
+      setMcpDiagnostics({ ok: false, message: error.message || 'Could not inspect Higgsfield MCP tools.', tools: [] })
+    } finally {
+      setWorkspaceLoading(false)
+    }
+  }
+
   const shortWorkspaceId = shortId(workspaceId)
 
   return (
@@ -154,22 +189,25 @@ export default function Settings() {
         </div>
         <div className="settings-row workspace-row">
           <div>
-            <strong>Higgsfield workspace</strong>
-            <span>{workspaceId ? `Saved ${shortWorkspaceId} for asset creation` : 'Required for Marketing Studio asset creation. Auto-detect will only work if Higgsfield exposes a workspace through the connected account.'}</span>
+            <strong>Higgsfield route</strong>
+            <span>{workspaceId ? `Advanced workspace override saved: ${shortWorkspaceId}` : 'MCP asset creation does not require a workspace ID. Use MCP tools to verify the connected account supports Marketing Studio.'}</span>
             {workspaceMessage ? <span className="settings-note">{workspaceMessage}</span> : null}
           </div>
           <form className="workspace-form" onSubmit={saveWorkspace}>
             <input
               value={workspaceInput}
               onChange={event => setWorkspaceInput(event.target.value)}
-              placeholder="Workspace ID"
+              placeholder="Optional workspace ID"
               aria-label="Higgsfield workspace ID"
             />
             <button className="secondary-btn" type="button" onClick={detectWorkspace} disabled={workspaceLoading}>
-              {workspaceLoading ? 'Checking...' : 'Auto-detect'}
+              {workspaceLoading ? 'Checking...' : 'FNF check'}
             </button>
             <button className="secondary-btn" type="button" onClick={runWorkspaceDiagnostics} disabled={workspaceLoading}>
               Diagnostics
+            </button>
+            <button className="secondary-btn" type="button" onClick={runMcpDiagnostics} disabled={workspaceLoading}>
+              MCP tools
             </button>
             <button className="primary-btn" type="submit">Save</button>
           </form>
@@ -189,6 +227,22 @@ export default function Settings() {
                   <li key={`${check.path}-${check.status}`}>
                     <strong>{check.path}</strong>
                     <span>{check.ok ? 'OK' : `Failed ${check.status}`} · {check.summary}</span>
+                  </li>
+                ))}
+              </ul>
+            ) : null}
+          </div>
+        )}
+        {mcpDiagnostics && (
+          <div className="diagnostic-box" aria-label="Higgsfield MCP diagnostics">
+            <strong>Higgsfield MCP route</strong>
+            <span>{mcpDiagnostics.message}</span>
+            {mcpDiagnostics.tools?.length ? (
+              <ul>
+                {mcpDiagnostics.tools.map(tool => (
+                  <li key={tool.name}>
+                    <strong>{tool.name}</strong>
+                    <span>{tool.description || 'Available MCP tool.'}</span>
                   </li>
                 ))}
               </ul>
