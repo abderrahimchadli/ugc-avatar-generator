@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { __testing, getHFWorkspaceId } from '../src/utils/higgsfieldAuth.js'
+import { __testing, ensureHFWorkspaceId, getHFWorkspaceId } from '../src/utils/higgsfieldAuth.js'
 
 function jwtWithPayload(payload) {
   const encode = value => Buffer.from(JSON.stringify(value)).toString('base64url')
@@ -42,4 +42,29 @@ test('getHFWorkspaceId reads the token claim and caches it', () => {
 
   assert.equal(getHFWorkspaceId(), 'workspace_cached')
   assert.equal(values.get('hf_workspace_id'), 'workspace_cached')
+})
+
+test('falls back to token subject when no workspace claim exists', () => {
+  const token = jwtWithPayload({
+    sub: 'user_workspace_fallback',
+    email: 'creator@example.com',
+  })
+  const values = installLocalStorage({ hf_access_token: token })
+
+  assert.equal(getHFWorkspaceId(), 'user_workspace_fallback')
+  assert.equal(values.get('hf_workspace_id'), 'user_workspace_fallback')
+})
+
+test('discovers workspace id from OAuth userinfo when local token has none', async () => {
+  const values = installLocalStorage({ hf_access_token: 'opaque-token' })
+  globalThis.fetch = async url => {
+    assert.equal(String(url).endsWith('/oauth2/userinfo'), true)
+    return {
+      ok: true,
+      json: async () => ({ active_workspace: { id: 'workspace_from_userinfo' } }),
+    }
+  }
+
+  assert.equal(await ensureHFWorkspaceId(), 'workspace_from_userinfo')
+  assert.equal(values.get('hf_workspace_id'), 'workspace_from_userinfo')
 })

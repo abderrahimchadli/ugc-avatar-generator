@@ -19,6 +19,7 @@ const WORKSPACE_ID_KEYS = [
   'fnf_workspace_id',
   'fnfWorkspaceId',
 ]
+const IDENTITY_ID_KEYS = ['sub', 'user_id', 'userId', 'account_id', 'accountId', 'id', 'uuid']
 
 // Exponential backoff with jitter: ~0.5s, 1s, 2s, 4s (+ up to 0.4s jitter)
 function backoffMs(attempt) {
@@ -120,8 +121,35 @@ function firstWorkspaceId(value, seen = new WeakSet()) {
   return ''
 }
 
+function firstIdentityId(value, seen = new WeakSet()) {
+  if (!value) return ''
+  if (typeof value === 'string') return value.trim()
+  if (typeof value !== 'object') return ''
+  if (seen.has(value)) return ''
+  seen.add(value)
+
+  for (const key of IDENTITY_ID_KEYS) {
+    const candidate = value[key]
+    if (typeof candidate === 'string' && candidate.trim()) return candidate.trim()
+    if (candidate && typeof candidate === 'object') {
+      const found = firstIdentityId(candidate, seen)
+      if (found) return found
+    }
+  }
+
+  for (const key of ['user', 'account', 'profile', 'identity']) {
+    const found = firstIdentityId(value[key], seen)
+    if (found) return found
+  }
+  return ''
+}
+
 function workspaceIdFromTokens(tokens) {
-  return firstWorkspaceId(tokens) || firstWorkspaceId(decodeJwtPayload(tokens?.access_token))
+  const payload = decodeJwtPayload(tokens?.access_token)
+  return firstWorkspaceId(tokens)
+    || firstWorkspaceId(payload)
+    || firstIdentityId(tokens)
+    || firstIdentityId(payload)
 }
 
 async function ensureClientId() {
@@ -284,9 +312,33 @@ export function getHFToken() { return localStorage.getItem('hf_access_token') }
 export function getHFWorkspaceId() {
   const stored = safeStorageGet(HF_WORKSPACE_KEY)
   if (stored) return stored
-  const fromToken = firstWorkspaceId(decodeJwtPayload(getHFToken()))
+  const payload = decodeJwtPayload(getHFToken())
+  const fromToken = firstWorkspaceId(payload) || firstIdentityId(payload)
   safeStorageSet(HF_WORKSPACE_KEY, fromToken)
   return fromToken
+}
+export async function ensureHFWorkspaceId() {
+  const existing = getHFWorkspaceId()
+  if (existing) return existing
+
+  const token = getHFToken()
+  if (!token) return ''
+
+  let data = null
+  try {
+    const res = await fetchWithRetry(`${AUTH_PROXY}/oauth2/userinfo`, {
+      headers: { Accept: 'application/json', Authorization: `Bearer ${token}` },
+    }, { attempts: 2, perAttemptTimeoutMs: 10000 })
+    if (res.ok) data = await res.json().catch(() => null)
+  } catch {
+    data = null
+  }
+
+  const discovered = firstWorkspaceId(data)
+    || firstIdentityId(data)
+    || firstIdentityId(decodeJwtPayload(token))
+  safeStorageSet(HF_WORKSPACE_KEY, discovered)
+  return discovered
 }
 export function isHFConnected() { return !!getHFToken() }
 export function disconnectHF() {
@@ -347,6 +399,7 @@ export function fireReferralOnce() {
 
 export const __testing = {
   decodeJwtPayload,
+  firstIdentityId,
   firstWorkspaceId,
   workspaceIdFromTokens,
 }
