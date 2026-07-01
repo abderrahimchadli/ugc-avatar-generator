@@ -61,12 +61,18 @@ export default function Settings() {
     const saved = setHFWorkspaceId(workspaceInput)
     setWorkspaceIdValue(saved)
     setWorkspaceInput(saved)
-    setWorkspaceMessage(saved ? 'Higgsfield workspace saved.' : 'Higgsfield workspace cleared.')
+    if (!saved) {
+      setWorkspaceMessage('Higgsfield workspace cleared.')
+    } else if (!hfConnected) {
+      setWorkspaceMessage('Higgsfield workspace saved. Connect Higgsfield before creating assets.')
+    } else {
+      setWorkspaceMessage('Higgsfield workspace saved.')
+    }
   }
 
   async function detectWorkspace() {
     if (!hfConnected) {
-      setWorkspaceMessage('Connect Higgsfield first.')
+      setWorkspaceMessage('Connect Higgsfield first, then Auto-detect can read the workspace from your Higgsfield account.')
       return
     }
     setWorkspaceLoading(true)
@@ -123,12 +129,11 @@ export default function Settings() {
               onChange={event => setWorkspaceInput(event.target.value)}
               placeholder="Workspace ID"
               aria-label="Higgsfield workspace ID"
-              disabled={!hfConnected}
             />
-            <button className="secondary-btn" type="button" onClick={detectWorkspace} disabled={!hfConnected || workspaceLoading}>
+            <button className="secondary-btn" type="button" onClick={detectWorkspace} disabled={workspaceLoading}>
               {workspaceLoading ? 'Checking...' : 'Auto-detect'}
             </button>
-            <button className="primary-btn" type="submit" disabled={!hfConnected}>Save</button>
+            <button className="primary-btn" type="submit">Save</button>
           </form>
         </div>
         <div className="settings-row">
