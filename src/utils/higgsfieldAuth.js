@@ -6,6 +6,19 @@ const AUTH_DIRECT = 'https://mcp.higgsfield.ai' // browser redirect — must be 
 // a 429. These statuses are transient — retry with backoff instead of failing hard.
 const RETRYABLE_STATUS = new Set([429, 500, 502, 503, 504])
 const sleep = ms => new Promise(r => setTimeout(r, ms))
+const HF_WORKSPACE_KEY = 'hf_workspace_id'
+const WORKSPACE_ID_KEYS = [
+  'workspace_id',
+  'workspaceId',
+  'workspace_uuid',
+  'workspaceUuid',
+  'active_workspace_id',
+  'activeWorkspaceId',
+  'current_workspace_id',
+  'currentWorkspaceId',
+  'fnf_workspace_id',
+  'fnfWorkspaceId',
+]
 
 // Exponential backoff with jitter: ~0.5s, 1s, 2s, 4s (+ up to 0.4s jitter)
 function backoffMs(attempt) {
@@ -51,6 +64,64 @@ function randomString(n = 64) {
   const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789'
   return Array.from(crypto.getRandomValues(new Uint8Array(n)))
     .map(b => chars[b % chars.length]).join('')
+}
+
+function safeStorageGet(key) {
+  try { return localStorage.getItem(key) || '' } catch { return '' }
+}
+
+function safeStorageSet(key, value) {
+  try { if (value) localStorage.setItem(key, value) } catch {}
+}
+
+function base64UrlDecode(value) {
+  const normalized = String(value || '').replace(/-/g, '+').replace(/_/g, '/')
+  const padded = normalized.padEnd(Math.ceil(normalized.length / 4) * 4, '=')
+  if (typeof atob === 'function') return atob(padded)
+  if (typeof Buffer !== 'undefined') return Buffer.from(padded, 'base64').toString('utf8')
+  return ''
+}
+
+function decodeJwtPayload(token) {
+  const part = String(token || '').split('.')[1]
+  if (!part) return null
+  try { return JSON.parse(base64UrlDecode(part)) } catch { return null }
+}
+
+function firstWorkspaceId(value, seen = new WeakSet()) {
+  if (!value) return ''
+  if (typeof value === 'string') return value.trim()
+  if (typeof value !== 'object') return ''
+  if (seen.has(value)) return ''
+  seen.add(value)
+
+  for (const key of WORKSPACE_ID_KEYS) {
+    const direct = firstWorkspaceId(value[key], seen)
+    if (direct) return direct
+  }
+
+  for (const key of ['workspace', 'active_workspace', 'current_workspace', 'fnf_workspace']) {
+    const nested = value[key]
+    if (typeof nested === 'string') return nested.trim()
+    if (nested?.id) return String(nested.id).trim()
+    const found = firstWorkspaceId(nested, seen)
+    if (found) return found
+  }
+
+  for (const key of ['workspaces', 'workspace_ids', 'workspaceIds']) {
+    const list = value[key]
+    if (!Array.isArray(list)) continue
+    for (const item of list) {
+      const found = typeof item === 'string' ? item.trim() : firstWorkspaceId(item, seen)
+      if (found) return found
+    }
+  }
+
+  return ''
+}
+
+function workspaceIdFromTokens(tokens) {
+  return firstWorkspaceId(tokens) || firstWorkspaceId(decodeJwtPayload(tokens?.access_token))
 }
 
 async function ensureClientId() {
@@ -160,6 +231,7 @@ function saveTokens(tokens) {
     localStorage.setItem('hf_token_expires_at', String(Date.now() + tokens.expires_in * 1000))
   }
   if (tokens.refresh_token) localStorage.setItem('hf_refresh_token', tokens.refresh_token)
+  safeStorageSet(HF_WORKSPACE_KEY, workspaceIdFromTokens(tokens))
 }
 
 function needsRefresh() {
@@ -209,9 +281,16 @@ export async function handleOAuthCallback(code, state) {
 }
 
 export function getHFToken() { return localStorage.getItem('hf_access_token') }
+export function getHFWorkspaceId() {
+  const stored = safeStorageGet(HF_WORKSPACE_KEY)
+  if (stored) return stored
+  const fromToken = firstWorkspaceId(decodeJwtPayload(getHFToken()))
+  safeStorageSet(HF_WORKSPACE_KEY, fromToken)
+  return fromToken
+}
 export function isHFConnected() { return !!getHFToken() }
 export function disconnectHF() {
-  ['hf_access_token', 'hf_refresh_token', 'hf_token_expires_at', 'hf_verifier', 'hf_state']
+  ['hf_access_token', 'hf_refresh_token', 'hf_token_expires_at', 'hf_verifier', 'hf_state', HF_WORKSPACE_KEY]
     .forEach(k => localStorage.removeItem(k))
 }
 
@@ -264,4 +343,10 @@ export function fireReferralOnce() {
   if (localStorage.getItem('hf_referral_fired')) return
   window.open('https://higgsfield.ai/?fpr=dankieft&fp_sid=tool', '_blank', 'noopener,noreferrer')
   localStorage.setItem('hf_referral_fired', '1')
+}
+
+export const __testing = {
+  decodeJwtPayload,
+  firstWorkspaceId,
+  workspaceIdFromTokens,
 }

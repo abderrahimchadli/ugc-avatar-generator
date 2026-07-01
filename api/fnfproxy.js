@@ -27,7 +27,7 @@ export default async function handler(req) {
   const corsHeaders = {
     'Access-Control-Allow-Origin': origin,
     'Access-Control-Allow-Methods': 'GET, POST, PUT, PATCH, DELETE, OPTIONS',
-    'Access-Control-Allow-Headers': 'authorization, content-type, accept, x-idempotency-key',
+    'Access-Control-Allow-Headers': 'authorization, content-type, accept, x-idempotency-key, x-fnf-workspace-id',
     'Access-Control-Allow-Credentials': 'true',
   }
   if (req.method === 'OPTIONS') {

@@ -1,4 +1,4 @@
-import { getHFToken, refreshHFToken } from './higgsfieldAuth.js'
+import { getHFToken, getHFWorkspaceId, refreshHFToken } from './higgsfieldAuth.js'
 
 const FNF_PROXY = '/api/fnf'
 const MAX_PRODUCT_IMAGES = 8
@@ -75,9 +75,14 @@ function makeApiError(status, data, fallback = '') {
 
 async function fnfRequest(path, { method = 'GET', body = null, headers = {} } = {}, isRetry = false) {
   const token = getHFToken()
+  const workspaceId = getHFWorkspaceId()
+  if (!workspaceId) {
+    throw new Error('Higgsfield workspace is missing. Reconnect Higgsfield in Settings, then try creating the asset again.')
+  }
   const requestHeaders = {
     Accept: 'application/json',
     Authorization: `Bearer ${token}`,
+    'X-Fnf-Workspace-Id': workspaceId,
     ...headers,
   }
   let requestBody = body
