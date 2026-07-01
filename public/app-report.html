@@ -149,7 +149,7 @@
           <li>Keeps extension imports linked to the user who started the generation session.</li>
           <li>Shows a Library with search, grouping, sorting, recent images, storage estimate, image removal, and Higgsfield asset status.</li>
           <li>Connects to Higgsfield through OAuth.</li>
-          <li>Includes an experimental Higgsfield Marketing Studio asset flow that now uses MCP tools instead of the old workspace-header route.</li>
+          <li>Includes an experimental Higgsfield Marketing Studio asset flow that uses Higgsfield MCP API tools instead of the old workspace-header route.</li>
           <li>Supports local demo users and Supabase-backed user approval when configured.</li>
           <li>Runs on Vercel for testing.</li>
         </ul>
@@ -166,7 +166,7 @@
           <li>Unit and integration tests: <code>npm test</code> passes.</li>
           <li>Production build: <code>npm run build</code> passes.</li>
           <li>Vercel deployment: production alias is live.</li>
-          <li>Higgsfield MCP proxy route is deployed and protected.</li>
+          <li>Higgsfield MCP API proxy route is deployed and protected.</li>
           <li>Higgsfield asset creation is still experimental, but no longer requires a workspace ID when MCP tools are available.</li>
         </ul>
       </section>
@@ -185,14 +185,15 @@
           <li>Generate an image.</li>
           <li>Save that generated image back to the correct app account and package.</li>
           <li>Open Library.</li>
-          <li>Run Higgsfield MCP tools diagnostics.</li>
-          <li>Create the Higgsfield Marketing Studio asset only if MCP exposes the required media and Marketing Studio tools.</li>
+          <li>Run Higgsfield API tools diagnostics.</li>
+          <li>Create the Higgsfield Marketing Studio asset only if the API exposes the required media upload, media confirmation, and Marketing Studio tools.</li>
           <li>Confirm that the asset appears and is usable inside the connected Higgsfield account.</li>
         </ol>
         <p>
-          The Higgsfield asset creation step is currently the main blocker. It depends
-          on Higgsfield MCP exposing media upload and Marketing Studio tools for the
-          connected account.
+          The Higgsfield asset creation step is currently the main blocker to verify live.
+          The app can connect through OAuth, and this account exposes the required API
+          tools, but Marketing Studio creation still needs confirmation with real avatar
+          and product packages.
         </p>
       </section>
 
@@ -222,7 +223,7 @@
             <li>Supabase persistence after logout/login on production.</li>
             <li>Image removal from local state and server state.</li>
             <li>Higgsfield OAuth connection on production.</li>
-            <li>Whether Higgsfield exposes the required MCP tools for the connected account.</li>
+            <li>Whether the Higgsfield API tools create visible assets for the connected account.</li>
             <li>Whether <code>show_marketing_studio</code> creates visible avatar/product assets in the Higgsfield website library.</li>
             <li>Marketing Studio avatar and product creation with real packages.</li>
             <li>Whether created Higgsfield assets appear where expected in the Higgsfield website.</li>

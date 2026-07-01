@@ -75,16 +75,16 @@ The extension:
 
 ## Higgsfield assets
 
-Connect Higgsfield in Settings, optionally run the MCP tools diagnostic, then
+Connect Higgsfield in Settings, run the API tools diagnostic, then
 open Library and click:
 
 ```text
 Create Higgsfield asset
 ```
 
-This path is experimental. It now uses Higgsfield's MCP route instead of the old
-workspace-header FNF route, so accounts without a workspace ID can still work if
-the MCP tools include `media_upload`, `media_confirm`, and
+This path is experimental. It uses Higgsfield's MCP API tools, not the old
+workspace-header FNF route, so accounts without a workspace ID can work when
+the connected account exposes `media_upload`, `media_confirm`, and
 `show_marketing_studio`. If those tools are not available, the app stops with a
 diagnostic message instead of claiming the asset was created.
 

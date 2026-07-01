@@ -35,8 +35,8 @@ can be considered stable.
 - Shows a Library with search, grouping, sorting, recent images, storage
   estimate, image removal, and package-level Higgsfield asset status.
 - Connects to Higgsfield through OAuth.
-- Includes an experimental Higgsfield Marketing Studio asset flow that now uses
-  MCP tools instead of the old workspace-header FNF route.
+- Includes an experimental Higgsfield Marketing Studio asset flow that uses
+  Higgsfield MCP API tools instead of the old workspace-header FNF route.
 - Supports local demo users and Supabase-backed user approval when configured.
 - Runs on Vercel for testing.
 
@@ -51,7 +51,7 @@ Latest verified checks:
 - Unit and integration tests: `npm test` passes.
 - Production build: `npm run build` passes.
 - Vercel deployment: production alias is live.
-- Higgsfield MCP proxy route is deployed and protected; it requires a valid
+- Higgsfield MCP API proxy route is deployed and protected; it requires a valid
   Higgsfield token.
 - The Higgsfield asset path is still experimental, but no longer requires a
   workspace ID when MCP tools are available.
@@ -71,16 +71,16 @@ tested from start to finish:
 4. Generate an image.
 5. Save that generated image back to the correct app account and package.
 6. Open Library.
-7. Run Higgsfield MCP tools diagnostics.
-8. Create the Higgsfield Marketing Studio asset if MCP exposes the required
-   media and Marketing Studio tools.
+7. Run Higgsfield API tools diagnostics.
+8. Create the Higgsfield Marketing Studio asset if the API exposes the required
+   media upload, media confirmation, and Marketing Studio tools.
 9. Confirm that the asset appears and is usable inside the connected Higgsfield
    account.
 
-The Higgsfield asset creation step is currently the main blocker. The app can
-connect through OAuth, but Marketing Studio creation depends on Higgsfield MCP
-exposing `media_upload`, `media_confirm`, and `show_marketing_studio` for the
-connected account.
+The Higgsfield asset creation step is currently the main blocker to verify live.
+The app can connect through OAuth, and this account exposes the required API
+tools, but Marketing Studio creation still needs confirmation with real avatar
+and product packages.
 
 ## What Is Working
 
@@ -110,7 +110,7 @@ connected account.
 - Supabase account persistence after logout/login on production.
 - Image removal from local state and server state.
 - Higgsfield OAuth connection on production.
-- Whether Higgsfield exposes the required MCP tools for the connected account.
+- Whether the Higgsfield API tools create visible assets for the connected account.
 - Whether `show_marketing_studio` creates visible avatar/product assets in the
   Higgsfield website library.
 - Higgsfield Marketing Studio avatar creation with a real avatar package.
