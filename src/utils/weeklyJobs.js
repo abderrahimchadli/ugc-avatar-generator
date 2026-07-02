@@ -94,6 +94,21 @@ export function getWeeklyJobReferences(job, packages = []) {
   }
 }
 
+export function getWeeklyJobVideoReferences(job, packages = [], options = {}) {
+  const avatarLimit = options.avatarLimit ?? 2
+  const productLimit = options.productLimit ?? 2
+  const refs = getWeeklyJobReferences(job, packages)
+  const selected = [
+    ...refs.avatarImages.slice(0, avatarLimit).map((item, index) => videoReferenceFromItem(item, refs.avatarPackage, 'avatar', index)),
+    ...refs.productImages.slice(0, productLimit).map((item, index) => videoReferenceFromItem(item, refs.productPackage, 'product', index)),
+  ].filter(item => item.url)
+
+  return selected.map((item, index) => ({
+    ...item,
+    refTag: `@image_${index + 1}`,
+  }))
+}
+
 export function getWeeklyJobChecklist(job, packages = []) {
   const refs = getWeeklyJobReferences(job, packages)
   return [
@@ -134,6 +149,38 @@ export function buildWeeklyJobVideoPrompt(job, packages = []) {
     '',
     'Shot plan: start with a strong first-frame hook, show the product clearly in the avatar hands or environment, include one close product detail, one natural reaction, and end with a direct call to action.',
     'Style: realistic social video, handheld phone feel, believable lighting, no random people, no logos unless provided, no watermark, clean face and product continuity.',
+  ].filter(Boolean).join('\n')
+}
+
+export function buildWeeklyJobSeedancePrompt(job, packages = []) {
+  const refs = getWeeklyJobReferences(job, packages)
+  const videoRefs = getWeeklyJobVideoReferences(job, packages)
+  const avatarName = refs.avatarPackage?.name || 'selected avatar'
+  const productName = refs.productPackage?.name || 'selected product'
+  const formatLabel = refs.videoFormat?.label || 'UGC ad'
+  const locationLabel = refs.location?.label || 'selected UGC location'
+  const avatarTags = videoRefs.filter(ref => ref.role === 'avatar').map(ref => ref.refTag).join(', ')
+  const productTags = videoRefs.filter(ref => ref.role === 'product').map(ref => ref.refTag).join(', ')
+  const referenceLines = videoRefs.map(ref => (
+    `${ref.refTag} = ${ref.role === 'avatar' ? 'avatar identity' : 'product'} reference from "${ref.packageName}". Use only for that role.`
+  ))
+
+  return [
+    `Seedance 2.0 vertical UGC ad for "${job.title}".`,
+    `Format: ${formatLabel}. Aspect ratio: 9:16. Duration target: 8 seconds.`,
+    '',
+    referenceLines.length ? 'References:' : '',
+    ...referenceLines,
+    '',
+    `Avatar: ${avatarTags || avatarName}. Keep ${avatarName}'s face, hair, body proportions, skin tone, and recognizable identity stable in every frame.`,
+    `Product: ${productTags || productName}. Keep ${productName}'s shape, color, scale, label position, and materials stable in every frame.`,
+    `Location: ${locationLabel}. ${refs.location?.description || ''}`,
+    '',
+    `Brief: ${job.videoBrief || 'Create a short vertical UGC ad using the avatar, product, and location references.'}`,
+    'Action: open on a clear hook, show the avatar naturally using or holding the product, include one close product detail, one authentic reaction, and finish with a direct CTA.',
+    'Camera: handheld phone video, eye-level, realistic lighting, natural micro-movement, clean continuity between shots.',
+    'Delivery: believable UGC performance, one clear action per shot, no music, no captions, no text overlays, no watermark, no random extra people.',
+    'Ending: hold a clean final pose with the product visible for the last beat.',
   ].filter(Boolean).join('\n')
 }
 
@@ -178,6 +225,17 @@ export function storageKeyForWeeklyJobs(profile) {
 function imagesFromPackage(pack) {
   if (!pack) return []
   return (pack.items || []).filter(item => item.url || item.dataUrl)
+}
+
+function videoReferenceFromItem(item, pack, role, index) {
+  return {
+    id: item.id || `${role}_${index}`,
+    url: item.url || item.dataUrl || '',
+    label: item.label || `${pack?.name || role} reference ${index + 1}`,
+    role,
+    packageId: pack?.id || '',
+    packageName: pack?.name || role,
+  }
 }
 
 function cleanText(value) {

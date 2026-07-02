@@ -1,10 +1,12 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import {
+  buildWeeklyJobSeedancePrompt,
   buildWeeklyJobVideoPrompt,
   createWeeklyJob,
   formatWeekRange,
   getWeeklyJobChecklist,
+  getWeeklyJobVideoReferences,
   groupWeeklyJobsByWeek,
   isWeeklyJobReady,
   mergeWeeklyJobLists,
@@ -82,6 +84,29 @@ test('builds video prompt from avatar, product, location, and brief', () => {
   assert.match(prompt, /Product reference: Glow Serum/)
   assert.match(prompt, /Location: Mirror Selfie/)
   assert.match(prompt, /Create a mirror routine ad/)
+})
+
+test('builds Seedance video prompt with ordered avatar and product references', () => {
+  const job = createWeeklyJob({
+    id: 'week_seedance',
+    title: 'Glow Serum Seedance week',
+    weekStart: '2026-07-02',
+    avatarPackageId: 'av_1',
+    productPackageId: 'prd_1',
+    locationId: 'bathroom',
+    videoBrief: 'Show a fast morning routine with one serum closeup.',
+  })
+  const refs = getWeeklyJobVideoReferences(job, packages)
+  const prompt = buildWeeklyJobSeedancePrompt(job, packages)
+
+  assert.deepEqual(refs.map(ref => [ref.refTag, ref.role, ref.packageName]), [
+    ['@image_1', 'avatar', 'Maya'],
+    ['@image_2', 'product', 'Glow Serum'],
+  ])
+  assert.match(prompt, /Seedance 2\.0 vertical UGC ad/)
+  assert.match(prompt, /@image_1 = avatar identity reference/)
+  assert.match(prompt, /@image_2 = product reference/)
+  assert.match(prompt, /no music, no captions, no text overlays/)
 })
 
 test('groups jobs by week with newest weeks first', () => {

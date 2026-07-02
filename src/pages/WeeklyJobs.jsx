@@ -4,6 +4,8 @@ import { useAuth } from '../context/auth'
 import { usePackages } from '../context/packageStore'
 import { useBrandDeals, useInfluencers } from '../store'
 import { hasSupabaseConfig } from '../lib/supabaseClient'
+import { isHFConnected } from '../utils/higgsfieldAuth'
+import { generateVideo } from '../utils/higgsfieldGenerate'
 import {
   deleteServerWeeklyJob,
   loadServerWeeklyJobs,
@@ -11,10 +13,11 @@ import {
 } from '../utils/serverWeeklyJobs'
 import {
   WEEKLY_VIDEO_FORMATS,
-  buildWeeklyJobVideoPrompt,
+  buildWeeklyJobSeedancePrompt,
   createWeeklyJob,
   getWeeklyJobChecklist,
   getWeeklyJobReferences,
+  getWeeklyJobVideoReferences,
   getWeeklyLocations,
   groupWeeklyJobsByWeek,
   isWeeklyJobReady,
@@ -61,6 +64,7 @@ export default function WeeklyJobs() {
   const locations = useMemo(() => getWeeklyLocations(), [])
   const [jobs, setJobs] = useState([])
   const [notice, setNotice] = useState('')
+  const [videoRuns, setVideoRuns] = useState({})
   const [serverStatus, setServerStatus] = useState(() => ({
     mode: hasSupabaseConfig ? 'server' : 'local',
     sync: hasSupabaseConfig ? 'idle' : 'local-only',
@@ -173,14 +177,14 @@ export default function WeeklyJobs() {
     setForm(current => ({ ...current, title: '', videoBrief: '', notes: '' }))
   }
 
-  function patchJob(jobId, patch) {
+  function patchJob(jobId, patch, message = 'Weekly job updated.') {
     let updatedJob = null
     const nextJobs = jobs.map(job => {
       if (job.id !== jobId) return job
       updatedJob = updateWeeklyJob(job, patch)
       return updatedJob
     })
-    persist(nextJobs, 'Weekly job updated.', () => saveServerWeeklyJob(profile, updatedJob))
+    persist(nextJobs, message, () => saveServerWeeklyJob(profile, updatedJob))
   }
 
   function deleteJob(jobId) {
@@ -217,12 +221,86 @@ export default function WeeklyJobs() {
   }
 
   async function copyPrompt(job) {
-    const prompt = buildWeeklyJobVideoPrompt(job, packages)
+    const prompt = buildWeeklyJobSeedancePrompt(job, packages)
     try {
       await navigator.clipboard.writeText(prompt)
-      setNotice('Video prompt copied.')
+      setNotice('Seedance video prompt copied.')
     } catch {
       setNotice('Copy failed. Select the prompt text manually.')
+    }
+  }
+
+  function updateVideoRun(jobId, patch) {
+    setVideoRuns(current => ({
+      ...current,
+      [jobId]: {
+        ...(current[jobId] || {}),
+        ...patch,
+      },
+    }))
+  }
+
+  async function generateSeedanceVideo(job) {
+    if (!isHFConnected()) {
+      setNotice('Connect Higgsfield in Settings first, then generate the Seedance video.')
+      return
+    }
+    const missing = getWeeklyJobChecklist(job, packages).filter(item => !item.done)
+    if (missing.length) {
+      setNotice(`This week job still needs: ${missing.map(item => item.label).join(', ')}.`)
+      return
+    }
+
+    const videoRefs = getWeeklyJobVideoReferences(job, packages)
+    if (!videoRefs.length) {
+      setNotice('Save avatar and product reference images before generating a Seedance video.')
+      return
+    }
+
+    const prompt = buildWeeklyJobSeedancePrompt(job, packages)
+    updateVideoRun(job.id, { generating: true, progress: 3, error: '', urls: [], shareUrls: [] })
+
+    try {
+      const result = await generateVideo({
+        prompt,
+        aspectRatio: '9:16',
+        duration: 8,
+        count: 1,
+        referenceImages: videoRefs.map(ref => ref.url),
+        model: 'seedance_2_0',
+        resolution: '1080p',
+        pendingKey: `weekly_${job.id}`,
+        onProgress: progress => updateVideoRun(job.id, { progress: Math.round(progress) }),
+        onPartialResults: urls => updateVideoRun(job.id, { urls: [...new Set((urls || []).filter(Boolean))] }),
+        isCancelled: () => false,
+      })
+      const urls = [...new Set((result.urls || []).filter(Boolean))]
+      const shareUrls = [...new Set((result.shareUrls || []).filter(Boolean))]
+      updateVideoRun(job.id, { generating: false, progress: 100, urls, shareUrls, error: '' })
+      patchJob(job.id, {
+        status: 'video-ready',
+        videoUrls: urls,
+        seedance: {
+          model: 'seedance_2_0',
+          prompt,
+          videoUrls: urls,
+          generatedAt: Date.now(),
+          shareUrls,
+          referenceMap: videoRefs.map(ref => ({
+            refTag: ref.refTag,
+            role: ref.role,
+            label: ref.label,
+            packageId: ref.packageId,
+            packageName: ref.packageName,
+          })),
+        },
+      }, `Seedance video generated for "${job.title}".`)
+    } catch (error) {
+      updateVideoRun(job.id, {
+        generating: false,
+        error: error.message || 'Seedance video generation failed.',
+      })
+      setNotice(error.message || 'Seedance video generation failed.')
     }
   }
 
@@ -345,7 +423,7 @@ export default function WeeklyJobs() {
             <ul className="steps-list">
               <li><strong>Weekly grouping:</strong> keep each ad job under a clear week.</li>
               <li><strong>Reference pack:</strong> avatar images, product images, and location are checked together.</li>
-              <li><strong>Video prompt:</strong> one copy-ready prompt is built from the selected references.</li>
+              <li><strong>Seedance video:</strong> generate one vertical video after the selected references are ready.</li>
               <li><strong>Existing tools:</strong> Studio, packages, library, extension, and Higgsfield stay separate but organized.</li>
             </ul>
           </div>
@@ -390,6 +468,8 @@ export default function WeeklyJobs() {
                   onPatch={patch => patchJob(job.id, patch)}
                   onDelete={() => deleteJob(job.id)}
                   onCopy={() => copyPrompt(job)}
+                  onGenerateVideo={() => generateSeedanceVideo(job)}
+                  videoRun={videoRuns[job.id]}
                 />
               ))}
             </div>
@@ -400,11 +480,14 @@ export default function WeeklyJobs() {
   )
 }
 
-function WeeklyJobCard({ job, packages, onPatch, onDelete, onCopy }) {
+function WeeklyJobCard({ job, packages, onPatch, onDelete, onCopy, onGenerateVideo, videoRun }) {
   const refs = getWeeklyJobReferences(job, packages)
   const checklist = getWeeklyJobChecklist(job, packages)
   const ready = checklist.every(item => item.done)
-  const prompt = buildWeeklyJobVideoPrompt(job, packages)
+  const prompt = buildWeeklyJobSeedancePrompt(job, packages)
+  const videos = videoRun?.urls?.length ? videoRun.urls : (job.videoUrls || job.seedance?.videoUrls || [])
+  const shareUrls = videoRun?.shareUrls?.length ? videoRun.shareUrls : (job.seedance?.shareUrls || [])
+  const progress = Math.max(0, Math.min(100, videoRun?.progress || 0))
 
   return (
     <article className="package-card weekly-job-card">
@@ -444,14 +527,37 @@ function WeeklyJobCard({ job, packages, onPatch, onDelete, onCopy }) {
       {job.notes && <p className="muted">{job.notes}</p>}
 
       <label>
-        Video reference prompt
+        Seedance reference prompt
         <textarea className="weekly-prompt-textarea" readOnly value={prompt} />
       </label>
 
       <div className="row-actions">
-        <button className="secondary-btn" onClick={onCopy} type="button">Copy video prompt</button>
+        <button className="primary-btn" onClick={onGenerateVideo} disabled={!ready || videoRun?.generating} type="button">
+          {videoRun?.generating ? `Generating ${progress}%` : 'Generate Seedance video'}
+        </button>
+        <button className="secondary-btn" onClick={onCopy} type="button">Copy prompt</button>
         <Link className="secondary-btn" to="/library">Open library</Link>
       </div>
+      {videoRun?.generating && (
+        <div className="weekly-video-progress" aria-label={`Seedance video generation ${progress}% complete`}>
+          <span style={{ width: `${progress}%` }} />
+        </div>
+      )}
+      {videoRun?.error && <p className="weekly-video-error">{videoRun.error}</p>}
+      {videos.length > 0 && (
+        <div className="weekly-video-results">
+          {videos.map((url, index) => (
+            <video key={`${url}-${index}`} src={url} controls playsInline preload="metadata" />
+          ))}
+          {shareUrls.length > 0 && (
+            <div className="weekly-video-links">
+              {shareUrls.map((url, index) => (
+                <a key={url} href={url} target="_blank" rel="noreferrer">Open Higgsfield video {index + 1}</a>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
     </article>
   )
 }

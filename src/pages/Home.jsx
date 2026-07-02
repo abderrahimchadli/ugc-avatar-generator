@@ -14,7 +14,7 @@ export default function Home() {
           <p className="eyebrow">Two-part creator workspace</p>
           <h1>Plan weekly UGC ads from avatars, products, locations, and saved references.</h1>
           <p className="hero-copy">
-            Keep Daan's Higgsfield-powered influencer workflow available in Studio, use the package bridge
+            Keep the Higgsfield-powered influencer workflow available in Studio, use the package bridge
             for Google Flow or ChatGPT images, then group each week's avatar, product, location, and video brief.
           </p>
           <div className="hero-actions">
