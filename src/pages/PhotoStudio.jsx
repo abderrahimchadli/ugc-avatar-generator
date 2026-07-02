@@ -2,7 +2,8 @@ import { useState, useRef, useEffect, useCallback } from 'react'
 import { createPortal } from 'react-dom'
 import { generateNImages, generatePosePreviews, generateSingleImage, savePendingPhoto, clearPendingPhoto, getPendingPhoto, pollAllJobs, hasPhotoGenSession } from '../utils/higgsfieldGenerate'
 import { isHFConnected } from '../utils/higgsfieldAuth'
-import { buildCharSheetPrompt, buildCharSheetPromptWithClaude } from '../utils/charSheetPrompt'
+import { buildCharSheetPrompt, buildCharSheetPromptWithAssistant } from '../utils/charSheetPrompt'
+import { resolvePromptAssistant } from '../utils/promptAssistant'
 import { useInfluencers, useBrandDeals } from '../store'
 import WardrobeDrawer from '../components/WardrobeDrawer'
 import {
@@ -335,15 +336,17 @@ function PropGeneratingSlot({ apiProgress, claudeStatus }) {
 
   const displayPct = Math.round(Math.max(smoothPct, apiProgress || 0))
   const elapsedLabel = elapsed < 60 ? `${elapsed}s` : `${Math.floor(elapsed / 60)}m ${elapsed % 60}s`
-  const statusLabel = claudeStatus === 'analyzing' ? 'Asking Codex…'
-    : claudeStatus === 'done' ? '✓ Codex analyzed'
+  const statusState = typeof claudeStatus === 'object' ? claudeStatus.state : claudeStatus
+  const assistantLabel = typeof claudeStatus === 'object' ? claudeStatus.label : 'Prompt assistant'
+  const statusLabel = statusState === 'analyzing' ? `Asking ${assistantLabel}...`
+    : statusState === 'done' ? `${assistantLabel} analyzed`
     : displayPct < 15 ? 'Starting…' : 'Generating…'
 
   return (
     <div style={{ width: 100, height: 100, borderRadius: 12, border: '1.5px solid rgba(139,92,246,0.35)', background: 'var(--bg-tertiary)', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 4, overflow: 'hidden', position: 'relative' }}>
       <div style={{ width: 18, height: 18, borderRadius: '50%', border: '2px solid rgba(139,92,246,0.2)', borderTopColor: '#8B5CF6', animation: 'spin 0.75s linear infinite' }} />
       <div style={{ fontSize: 11, fontWeight: 700, color: '#8B5CF6' }}>{displayPct}%</div>
-      <div style={{ fontSize: 8, fontWeight: 600, color: claudeStatus === 'done' ? '#34C759' : claudeStatus === 'analyzing' ? '#8B5CF6' : 'var(--text-tertiary)', textAlign: 'center', letterSpacing: '0.2px', padding: '0 6px' }}>{statusLabel}</div>
+      <div style={{ fontSize: 8, fontWeight: 600, color: statusState === 'done' ? '#34C759' : statusState === 'analyzing' ? '#8B5CF6' : 'var(--text-tertiary)', textAlign: 'center', letterSpacing: '0.2px', padding: '0 6px' }}>{statusLabel}</div>
       <div style={{ fontSize: 8, color: 'var(--text-tertiary)', fontVariantNumeric: 'tabular-nums' }}>{elapsedLabel}</div>
       {/* Progress bar */}
       <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0, height: 3, background: 'var(--border)' }}>
@@ -642,13 +645,13 @@ export default function PhotoStudioPanel({ influencer, onGoToWardrobe, onUseAsSt
     setPropProgress(p => ({ ...p, [targetIdx]: 0 }))
     try {
       let prompt = null
-      const claudeKey = localStorage.getItem('claude_api_key')
-      if (claudeKey) {
+      const assistant = resolvePromptAssistant()
+      if (assistant.provider !== 'none') {
         try {
           setPropProgress(p => ({ ...p, [targetIdx]: 5 }))
-          setPropClaudeStatus(s => ({ ...s, [targetIdx]: 'analyzing' }))
-          prompt = await buildCharSheetPromptWithClaude(slot.image, propText || 'product', '', claudeKey)
-          setPropClaudeStatus(s => ({ ...s, [targetIdx]: 'done' }))
+          setPropClaudeStatus(s => ({ ...s, [targetIdx]: { state: 'analyzing', label: assistant.label } }))
+          prompt = await buildCharSheetPromptWithAssistant(slot.image, propText || 'product', '', assistant)
+          setPropClaudeStatus(s => ({ ...s, [targetIdx]: { state: 'done', label: assistant.label } }))
           setTimeout(() => setPropClaudeStatus(s => ({ ...s, [targetIdx]: null })), 3000)
         } catch (e) {
           setPropClaudeStatus(s => ({ ...s, [targetIdx]: null }))

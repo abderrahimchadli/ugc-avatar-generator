@@ -11,7 +11,8 @@ import { buildThreeVariationPrompts } from '../utils/systemPrompt'
 import { gColor, pLabel } from '../utils/influencerUtils'
 import { useTheme } from '../context/theme'
 import { isHFConnected } from '../utils/higgsfieldAuth'
-import { buildCharSheetPrompt, buildCharSheetPromptWithClaude } from '../utils/charSheetPrompt'
+import { buildCharSheetPrompt, buildCharSheetPromptWithAssistant } from '../utils/charSheetPrompt'
+import { resolvePromptAssistant } from '../utils/promptAssistant'
 import PhotoStudioPanel from './PhotoStudio'
 import WardrobeDrawer from '../components/WardrobeDrawer'
 
@@ -2119,10 +2120,10 @@ function BrandDealCard({ deal, editingBrand, editBrand, onEditBrand, onStartEdit
   },[generating])
 
   function genLabel(pct){
-    if(pct<8) return 'Asking Codex…'
-    if(pct<20) return 'Uploading…'
-    if(pct<75) return 'Generating…'
-    return 'Almost done…'
+    if(pct<8) return 'Analyzing prompt...'
+    if(pct<20) return 'Uploading...'
+    if(pct<75) return 'Generating...'
+    return 'Almost done...'
   }
 
   function handleFile(f) {
@@ -2201,14 +2202,19 @@ function BrandDealCard({ deal, editingBrand, editBrand, onEditBrand, onStartEdit
             </div>
           </div>
         )}
-        {!generating && claudeStatus && (
+        {!generating && claudeStatus && (() => {
+          const statusState = typeof claudeStatus === 'object' ? claudeStatus.state : claudeStatus
+          const assistantLabel = typeof claudeStatus === 'object' ? claudeStatus.label : 'Prompt assistant'
+          const errorText = typeof claudeStatus === 'object' ? claudeStatus.message : String(claudeStatus).replace('error:', '')
+          return (
           <div style={{position:'absolute',bottom:6,right:6,fontSize:10,fontWeight:700,padding:'3px 7px',borderRadius:6,backdropFilter:'blur(6px)',
-            background: claudeStatus==='done' ? 'rgba(52,199,89,0.85)' : claudeStatus==='analyzing' ? 'rgba(139,92,246,0.85)' : 'rgba(255,59,48,0.85)',
+            background: statusState==='done' ? 'rgba(52,199,89,0.85)' : statusState==='analyzing' ? 'rgba(139,92,246,0.85)' : 'rgba(255,59,48,0.85)',
             color:'#fff',maxWidth:'90%',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',
           }}>
-            {claudeStatus==='done' ? '✓ Codex analyzed' : claudeStatus==='analyzing' ? 'Codex analyzing…' : '✗ '+claudeStatus.replace('error:','')}
+            {statusState==='done' ? `${assistantLabel} analyzed` : statusState==='analyzing' ? `${assistantLabel} analyzing...` : errorText}
           </div>
-        )}
+          )
+        })()}
         <input ref={fileRef} type="file" accept="image/*" multiple style={{display:'none'}}
           onChange={e=>{Array.from(e.target.files).forEach(f=>handleFile(f));e.target.value=''}}/>
       </div>
@@ -2444,18 +2450,18 @@ function BrandDealSection({ deals=[], onChange }) {
     setGenProgress(p=>({...p,[deal.id]:0}))
 
     let imagePrompt = null
-    const claudeKey = localStorage.getItem('claude_api_key')
+    const assistant = resolvePromptAssistant()
     const allImages = deal.images?.length ? deal.images : (deal.image ? [deal.image] : [])
-    if (claudeKey && allImages.length) {
-      setClaudeStatus(s=>({...s,[deal.id]:'analyzing'}))
+    if (assistant.provider !== 'none' && allImages.length) {
+      setClaudeStatus(s=>({...s,[deal.id]:{ state: 'analyzing', label: assistant.label }}))
       try {
         setGenProgress(p=>({...p,[deal.id]:5}))
-        imagePrompt = await buildCharSheetPromptWithClaude(allImages, deal.brand, deal.category, claudeKey)
-        setClaudeStatus(s=>({...s,[deal.id]:'done'}))
+        imagePrompt = await buildCharSheetPromptWithAssistant(allImages, deal.brand, deal.category, assistant)
+        setClaudeStatus(s=>({...s,[deal.id]:{ state: 'done', label: assistant.label }}))
         setTimeout(()=>setClaudeStatus(s=>({...s,[deal.id]:null})),3000)
       } catch(e) {
-        alert('Codex: ' + e.message)
-        setClaudeStatus(s=>({...s,[deal.id]:'error:'+e.message}))
+        alert(`${assistant.label}: ` + e.message)
+        setClaudeStatus(s=>({...s,[deal.id]:{ state: 'error', label: assistant.label, message: e.message }}))
         setTimeout(()=>setClaudeStatus(s=>({...s,[deal.id]:null})),5000)
       }
     }

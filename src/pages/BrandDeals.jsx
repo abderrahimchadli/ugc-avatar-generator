@@ -3,7 +3,8 @@ import { useBrandDeals, generateId } from '../store'
 import { compressImage, downloadImage } from '../utils/imageUtils'
 import { generateSingleImage } from '../utils/higgsfieldGenerate'
 import { isHFConnected } from '../utils/higgsfieldAuth'
-import { buildCharSheetPrompt, buildCharSheetPromptWithClaude } from '../utils/charSheetPrompt'
+import { buildCharSheetPrompt, buildCharSheetPromptWithAssistant } from '../utils/charSheetPrompt'
+import { resolvePromptAssistant } from '../utils/promptAssistant'
 import Lightbox from '../components/Lightbox'
 
 function NewDealModal({ onClose, onSave }) {
@@ -184,7 +185,7 @@ function DealCard({ deal, generating, progress, onDelete, onOpen, onRename, onGe
               animation: 'spin 0.75s linear infinite',
             }} />
             <div style={{ color: '#fff', fontSize: 12, fontWeight: 600 }}>
-              {progress < 10 ? 'Asking Codex…' : progress < 25 ? 'Uploading…' : 'Generating…'}
+              {progress < 10 ? 'Analyzing prompt...' : progress < 25 ? 'Uploading...' : 'Generating...'}
             </div>
             <div style={{ color: 'rgba(255,255,255,0.5)', fontSize: 11 }}>{Math.round(progress)}%</div>
           </div>
@@ -319,22 +320,22 @@ export default function BrandDeals() {
     setGenProgress(p => ({ ...p, [deal.id]: 0 }))
 
     try {
-      // Step 1 — Claude studies the image and writes the full Higgsfield prompt
+      // Step 1 — prompt assistant studies the image and writes the full Higgsfield prompt
       let imagePrompt = null
-      const claudeKey = localStorage.getItem('claude_api_key')
-      console.log('[BrandDeals] claudeKey found:', !!claudeKey, '| deal.image exists:', !!deal.image)
-      if (claudeKey && deal.image) {
+      const assistant = resolvePromptAssistant()
+      console.log('[BrandDeals] assistant found:', assistant.provider !== 'none', '| deal.image exists:', !!deal.image)
+      if (assistant.provider !== 'none' && deal.image) {
         try {
           setGenProgress(p => ({ ...p, [deal.id]: 5 }))
-          console.log('[BrandDeals] Calling Claude...')
-          imagePrompt = await buildCharSheetPromptWithClaude(deal.image, deal.brand, deal.category, claudeKey)
-          console.log('[BrandDeals] Claude returned prompt:', imagePrompt?.slice(0, 120))
+          console.log(`[BrandDeals] Calling ${assistant.label}...`)
+          imagePrompt = await buildCharSheetPromptWithAssistant(deal.image, deal.brand, deal.category, assistant)
+          console.log(`[BrandDeals] ${assistant.label} returned prompt:`, imagePrompt?.slice(0, 120))
         } catch (e) {
-          console.error('[BrandDeals] Claude failed:', e.message)
+          console.error(`[BrandDeals] ${assistant.label} failed:`, e.message)
         }
       }
 
-      // Step 2 — fall back to template if Claude wasn't available or failed
+      // Step 2 — fall back to template if the assistant wasn't available or failed
       if (!imagePrompt) {
         console.log('[BrandDeals] Using text fallback prompt')
         imagePrompt = buildCharSheetPrompt(deal.brand, deal.category)

@@ -9,6 +9,13 @@ import { useAuth } from '../context/auth'
 import { usePackages } from '../context/packageStore'
 import { listHiggsfieldTools } from '../utils/higgsfieldGenerate'
 import { formatBytes } from '../utils/promptPresets'
+import {
+  DEFAULT_CODEX_MODEL,
+  PROMPT_ASSISTANT_PROVIDERS,
+  assistantStatusText,
+  getPromptAssistantSettings,
+  savePromptAssistantSettings,
+} from '../utils/promptAssistant'
 
 export default function Settings() {
   const location = useLocation()
@@ -18,6 +25,17 @@ export default function Settings() {
   const [hfLoading, setHfLoading] = useState(false)
   const [apiLoading, setApiLoading] = useState(false)
   const [apiDiagnostics, setApiDiagnostics] = useState(null)
+  const [assistantSettings, setAssistantSettings] = useState(() => getPromptAssistantSettings())
+  const [assistantDraft, setAssistantDraft] = useState(() => {
+    const settings = getPromptAssistantSettings()
+    return {
+      preferred: settings.preferred,
+      claudeKey: settings.claudeKey,
+      codexKey: settings.codexKey,
+      codexModel: settings.codexModel,
+    }
+  })
+  const [assistantNotice, setAssistantNotice] = useState('')
 
   useEffect(() => {
     const params = new URLSearchParams(location.search)
@@ -78,6 +96,27 @@ export default function Settings() {
     }
   }
 
+  function updateAssistantDraft(field, value) {
+    setAssistantDraft(current => ({ ...current, [field]: value }))
+  }
+
+  function saveAssistant(event) {
+    event.preventDefault()
+    const next = savePromptAssistantSettings(assistantDraft)
+    setAssistantSettings(next)
+    setAssistantNotice('Prompt assistant saved.')
+    window.setTimeout(() => setAssistantNotice(''), 2500)
+  }
+
+  function clearAssistant() {
+    const nextDraft = { preferred: 'auto', claudeKey: '', codexKey: '', codexModel: DEFAULT_CODEX_MODEL }
+    savePromptAssistantSettings(nextDraft)
+    setAssistantDraft(nextDraft)
+    setAssistantSettings(getPromptAssistantSettings())
+    setAssistantNotice('Prompt assistant disconnected.')
+    window.setTimeout(() => setAssistantNotice(''), 2500)
+  }
+
   return (
     <main className="page-shell narrow">
       <section className="panel stack">
@@ -95,6 +134,58 @@ export default function Settings() {
         </div>
         <div className="settings-row">
           <div><strong>Storage estimate</strong><span>{storageStats.packages} packages · {storageStats.images} images · {formatBytes(storageStats.usedBytes)}</span></div>
+        </div>
+        <div className="settings-row workspace-row">
+          <div>
+            <strong>Prompt assistant</strong>
+            <span>{assistantStatusText()} · Auto uses Claude first, then Codex if Claude is not connected.</span>
+          </div>
+          <form className="prompt-assistant-form" onSubmit={saveAssistant}>
+            <label>
+              Preferred
+              <select value={assistantDraft.preferred} onChange={event => updateAssistantDraft('preferred', event.target.value)}>
+                {PROMPT_ASSISTANT_PROVIDERS.map(provider => (
+                  <option key={provider.id} value={provider.id}>{provider.label}</option>
+                ))}
+              </select>
+            </label>
+            <label>
+              Claude API key
+              <input
+                type="password"
+                value={assistantDraft.claudeKey}
+                onChange={event => updateAssistantDraft('claudeKey', event.target.value)}
+                placeholder="sk-ant-..."
+                autoComplete="off"
+              />
+            </label>
+            <label>
+              Codex / OpenAI API key
+              <input
+                type="password"
+                value={assistantDraft.codexKey}
+                onChange={event => updateAssistantDraft('codexKey', event.target.value)}
+                placeholder="sk-..."
+                autoComplete="off"
+              />
+            </label>
+            <label>
+              Codex model
+              <input
+                value={assistantDraft.codexModel}
+                onChange={event => updateAssistantDraft('codexModel', event.target.value)}
+                placeholder={DEFAULT_CODEX_MODEL}
+              />
+            </label>
+            <div className="prompt-assistant-actions">
+              <button className="primary-btn" type="submit">Save assistant</button>
+              <button className="secondary-btn" type="button" onClick={clearAssistant}>Disconnect</button>
+            </div>
+          </form>
+        </div>
+        <div className="diagnostic-box">
+          <strong>Assistant routing</strong>
+          <span>{assistantNotice || `${assistantSettings.hasClaude ? 'Claude connected' : 'Claude not connected'} · ${assistantSettings.hasCodex ? 'Codex connected' : 'Codex not connected'} · Preferred: ${assistantSettings.preferred}`}</span>
         </div>
         <div className="settings-row">
           <div><strong>Higgsfield</strong><span>{hfConnected ? 'Connected for Marketing Studio assets' : 'Not connected'}</span></div>

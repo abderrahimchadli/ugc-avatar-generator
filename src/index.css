@@ -434,6 +434,21 @@ a {
   width: min(260px, 100%);
 }
 
+.prompt-assistant-form {
+  width: min(100%, 620px);
+  display: grid;
+  grid-template-columns: repeat(2, minmax(180px, 1fr));
+  gap: 10px;
+}
+
+.prompt-assistant-actions {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
 .settings-note {
   color: var(--text-primary);
 }
@@ -1014,6 +1029,12 @@ textarea {
   }
   .workspace-form input {
     width: 100%;
+  }
+  .prompt-assistant-form {
+    grid-template-columns: 1fr;
+  }
+  .prompt-assistant-actions {
+    justify-content: stretch;
   }
   .diagnostic-grid {
     grid-template-columns: 1fr;

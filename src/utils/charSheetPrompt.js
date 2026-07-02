@@ -1,3 +1,5 @@
+import { resolvePromptAssistant } from './promptAssistant.js'
+
 export function buildInfluencerSheetPrompt(inf) {
   const phys = inf.physicalDesc ? `The character: ${inf.physicalDesc}. ` : ''
   const style = inf.clothingStyle ? `Outfit: ${inf.clothingStyle}. ` : ''
@@ -28,7 +30,20 @@ export function buildCharSheetPrompt(brand, category, productDesc = null, angles
 }
 
 export async function buildCharSheetPromptWithClaude(images, brand, category, apiKey) {
+  return buildCharSheetPromptWithProvider(images, brand, category, { provider: 'claude', apiKey, label: 'Claude' })
+}
+
+export async function buildCharSheetPromptWithAssistant(images, brand, category, assistant = resolvePromptAssistant()) {
+  if (!assistant || assistant.provider === 'none') return null
+  return buildCharSheetPromptWithProvider(images, brand, category, assistant)
+}
+
+export async function buildCharSheetPromptWithProvider(images, brand, category, assistant) {
   // images is an array of data URLs
+  if (assistant.provider === 'codex') {
+    return buildCharSheetPromptWithCodex(images, brand, category, assistant.apiKey, assistant.model)
+  }
+
   const imageBlocks = (Array.isArray(images) ? images : [images]).map(dataUrl => {
     const [header, base64] = dataUrl.split(',')
     const mediaType = header.match(/:(.*?);/)?.[1] || 'image/jpeg'
@@ -40,7 +55,7 @@ export async function buildCharSheetPromptWithClaude(images, brand, category, ap
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      'x-api-key': apiKey,
+      'x-api-key': assistant.apiKey,
       'anthropic-version': '2023-06-01',
     },
     body: JSON.stringify({
@@ -67,13 +82,63 @@ Output only valid JSON. No explanation, no markdown.` },
     }),
   })
 
-  if (!res.ok) throw new Error(`Codex prompt analysis failed (${res.status})`)
+  if (!res.ok) throw new Error(`${assistant.label || 'Claude'} prompt analysis failed (${res.status})`)
   const data = await res.json()
   if (data.error) throw new Error(data.error.message)
 
   const text = data.content?.[0]?.text?.trim()
-  if (!text) throw new Error('Codex returned empty response')
+  if (!text) throw new Error(`${assistant.label || 'Claude'} returned empty response`)
+  return productPromptFromAssistantText(text, brand, category, assistant.label || 'Claude')
+}
 
+async function buildCharSheetPromptWithCodex(images, brand, category, apiKey, model = 'gpt-4.1') {
+  const imageBlocks = (Array.isArray(images) ? images : [images]).map(dataUrl => ({
+    type: 'input_image',
+    image_url: dataUrl,
+    detail: 'high',
+  }))
+
+  const imageCount = imageBlocks.length
+  const res = await fetch('/api/codex', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'x-api-key': apiKey,
+    },
+    body: JSON.stringify({
+      model,
+      max_output_tokens: 2000,
+      instructions: `You are a luxury product expert and photography director. You have deep knowledge of designer brands, product lines, and how they look from every angle. You study product images and use your training knowledge to produce detailed, accurate descriptions. Output JSON only - nothing else.`,
+      input: [{
+        role: 'user',
+        content: [
+          ...imageBlocks,
+          { type: 'input_text', text: `Brand: ${brand}${category ? `\nCategory: ${category}` : ''}
+
+You have been given ${imageCount} image${imageCount > 1 ? 's' : ''} of this product from different angles. Study all of them and identify exactly what product this is. Use what you can see across all images AND your training knowledge to describe it accurately from every angle.
+
+Output a JSON object with exactly two fields:
+
+"productDesc" - a precise, complete description covering the entire product: exact colors on every surface, materials, all logos and text (front, back, sides, interior), construction details, hardware. Use your knowledge of this product line to fill in surfaces not visible in the image. Be specific and confident - no hedging words like "likely" or "typically". Write it as definitive fact.
+
+"angles" - exactly 6 panel descriptions for a professional character sheet, each with specific visual details for that angle. Use your product knowledge to describe what is actually on each surface - the real back closure, real side panels, real sole or lining - not generic guesses.
+
+Output only valid JSON. No explanation, no markdown.` },
+        ],
+      }],
+    }),
+  })
+
+  if (!res.ok) throw new Error(`Codex prompt analysis failed (${res.status})`)
+  const data = await res.json()
+  if (data.error) throw new Error(data.error.message)
+
+  const text = extractCodexText(data)
+  if (!text) throw new Error('Codex returned empty response')
+  return productPromptFromAssistantText(text, brand, category, 'Codex')
+}
+
+function productPromptFromAssistantText(text, brand, category, label) {
   // Try to extract JSON from anywhere in the response
   let json = null
   const attempts = [
@@ -85,8 +150,21 @@ Output only valid JSON. No explanation, no markdown.` },
     try { json = attempt(); break } catch {}
   }
 
-  if (!json) throw new Error('Codex response could not be parsed as JSON. Raw: ' + text.slice(0, 200))
-  if (!json.productDesc) throw new Error('Codex JSON missing productDesc field')
+  if (!json) throw new Error(`${label} response could not be parsed as JSON. Raw: ` + text.slice(0, 200))
+  if (!json.productDesc) throw new Error(`${label} JSON missing productDesc field`)
 
   return buildCharSheetPrompt(brand, category, json.productDesc, json.angles || null)
+}
+
+export function extractCodexText(data) {
+  if (data.output_text) return String(data.output_text).trim()
+  const output = Array.isArray(data.output) ? data.output : []
+  for (const item of output) {
+    const content = Array.isArray(item.content) ? item.content : []
+    for (const part of content) {
+      if (part.type === 'output_text' && part.text) return String(part.text).trim()
+      if (part.text) return String(part.text).trim()
+    }
+  }
+  return ''
 }
