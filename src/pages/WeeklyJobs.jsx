@@ -5,7 +5,8 @@ import { usePackages } from '../context/packageStore'
 import { useBrandDeals, useInfluencers } from '../store'
 import { hasSupabaseConfig } from '../lib/supabaseClient'
 import { isHFConnected } from '../utils/higgsfieldAuth'
-import { generateVideo } from '../utils/higgsfieldGenerate'
+import { generateSingleImage, generateVideo } from '../utils/higgsfieldGenerate'
+import { buildPrompt } from '../utils/promptPresets'
 import {
   deleteServerWeeklyJob,
   loadServerWeeklyJobs,
@@ -53,7 +54,7 @@ function writeJobs(key, value) {
 
 export default function WeeklyJobs() {
   const { profile } = useAuth()
-  const { packages } = usePackages()
+  const { packages, addPackageItem } = usePackages()
   const influencerStore = useInfluencers() || [[], () => {}]
   const brandDealStore = useBrandDeals() || [[], () => {}]
   const [influencers] = influencerStore
@@ -64,6 +65,7 @@ export default function WeeklyJobs() {
   const locations = useMemo(() => getWeeklyLocations(), [])
   const [jobs, setJobs] = useState([])
   const [notice, setNotice] = useState('')
+  const [referenceRuns, setReferenceRuns] = useState({})
   const [videoRuns, setVideoRuns] = useState({})
   const [serverStatus, setServerStatus] = useState(() => ({
     mode: hasSupabaseConfig ? 'server' : 'local',
@@ -240,6 +242,85 @@ export default function WeeklyJobs() {
     }))
   }
 
+  function updateReferenceRun(jobId, kind, patch) {
+    const key = `${jobId}:${kind}`
+    setReferenceRuns(current => ({
+      ...current,
+      [key]: {
+        ...(current[key] || {}),
+        ...patch,
+      },
+    }))
+  }
+
+  async function generateReference(job, kind) {
+    if (!isHFConnected()) {
+      setNotice('Connect Higgsfield in Settings first, then generate references in app.')
+      return
+    }
+
+    const refs = getWeeklyJobReferences(job, packages)
+    const isAvatar = kind === 'avatar'
+    const isProduct = kind === 'product'
+    const pack = isAvatar ? refs.avatarPackage : isProduct ? refs.productPackage : null
+    if ((isAvatar || isProduct) && !pack) {
+      setNotice(`Select a ${kind} package before generating this reference.`)
+      return
+    }
+    if (kind === 'location' && !refs.location) {
+      setNotice('Select a weekly location before generating a location reference.')
+      return
+    }
+
+    updateReferenceRun(job.id, kind, { generating: true, progress: 5, error: '' })
+    try {
+      const prompt = buildWeeklyReferencePrompt({ job, refs, pack, kind })
+      const url = await generateSingleImage({
+        prompt,
+        aspectRatio: '9:16',
+        resolution: '4k',
+        onProgress: progress => updateReferenceRun(job.id, kind, { progress: Math.round(progress) }),
+      })
+      if (!url) throw new Error('No image was returned.')
+
+      if (isAvatar || isProduct) {
+        const mode = referenceModeFor(kind, refs)
+        addPackageItem(pack.id, {
+          importId: `weekly-${job.id}-${kind}-${Date.now()}`,
+          label: `${job.title} ${referenceLabelFor(kind, refs)}`,
+          type: 'image',
+          mode,
+          source: 'weekly-job-studio',
+          url,
+          prompt,
+        })
+      } else {
+        patchJob(job.id, {
+          locationReference: {
+            id: `loc_${Date.now()}`,
+            label: refs.location?.label || 'Location reference',
+            packageName: refs.location?.label || 'Location',
+            type: 'image',
+            mode: 'location_reference',
+            source: 'weekly-job-studio',
+            url,
+            prompt,
+            createdAt: Date.now(),
+          },
+        }, `Location reference generated for "${job.title}".`)
+      }
+
+      updateReferenceRun(job.id, kind, { generating: false, progress: 100, error: '' })
+      if (isAvatar || isProduct) setNotice(`${capitalize(kind)} reference generated and saved to "${pack.name}".`)
+    } catch (error) {
+      updateReferenceRun(job.id, kind, {
+        generating: false,
+        error: error.message || `${capitalize(kind)} reference generation failed.`,
+      })
+      setNotice(error.message || `${capitalize(kind)} reference generation failed.`)
+    }
+  }
+
   async function generateSeedanceVideo(job) {
     if (!isHFConnected()) {
       setNotice('Connect Higgsfield in Settings first, then generate the Seedance video.')
@@ -315,7 +396,7 @@ export default function WeeklyJobs() {
         <div className="row-actions">
           <Link className="secondary-btn" to="/avatars">Avatars</Link>
           <Link className="secondary-btn" to="/products">Products</Link>
-          <Link className="primary-btn" to="/prompt-builder">Build prompts</Link>
+          <Link className="primary-btn" to="/studio">Open studio</Link>
         </div>
       </div>
 
@@ -422,7 +503,7 @@ export default function WeeklyJobs() {
             <p className="eyebrow">What this adds</p>
             <ul className="steps-list">
               <li><strong>Weekly grouping:</strong> keep each ad job under a clear week.</li>
-              <li><strong>Reference pack:</strong> avatar images, product images, and location are checked together.</li>
+              <li><strong>Reference generation:</strong> create avatar, product, and location images directly in app.</li>
               <li><strong>Seedance video:</strong> generate one vertical video after the selected references are ready.</li>
               <li><strong>Existing tools:</strong> Studio, packages, library, extension, and Higgsfield stay separate but organized.</li>
             </ul>
@@ -432,7 +513,7 @@ export default function WeeklyJobs() {
             <div className="weekly-action-list">
               <Link to="/avatars">Create influencer avatar</Link>
               <Link to="/products">Create product images</Link>
-              <Link to="/prompt-builder">Generate image prompts</Link>
+              <Link to="/studio">Open Studio generator</Link>
               <Link to="/influencers">Open original Studio</Link>
               <Link to="/library">Check saved references</Link>
             </div>
@@ -469,6 +550,8 @@ export default function WeeklyJobs() {
                   onDelete={() => deleteJob(job.id)}
                   onCopy={() => copyPrompt(job)}
                   onGenerateVideo={() => generateSeedanceVideo(job)}
+                  onGenerateReference={kind => generateReference(job, kind)}
+                  referenceRuns={referenceRuns}
                   videoRun={videoRuns[job.id]}
                 />
               ))}
@@ -480,7 +563,7 @@ export default function WeeklyJobs() {
   )
 }
 
-function WeeklyJobCard({ job, packages, onPatch, onDelete, onCopy, onGenerateVideo, videoRun }) {
+function WeeklyJobCard({ job, packages, onPatch, onDelete, onCopy, onGenerateVideo, onGenerateReference, referenceRuns, videoRun }) {
   const refs = getWeeklyJobReferences(job, packages)
   const checklist = getWeeklyJobChecklist(job, packages)
   const ready = checklist.every(item => item.done)
@@ -488,6 +571,9 @@ function WeeklyJobCard({ job, packages, onPatch, onDelete, onCopy, onGenerateVid
   const videos = videoRun?.urls?.length ? videoRun.urls : (job.videoUrls || job.seedance?.videoUrls || [])
   const shareUrls = videoRun?.shareUrls?.length ? videoRun.shareUrls : (job.seedance?.shareUrls || [])
   const progress = Math.max(0, Math.min(100, videoRun?.progress || 0))
+  const avatarRun = referenceRuns[`${job.id}:avatar`] || {}
+  const productRun = referenceRuns[`${job.id}:product`] || {}
+  const locationRun = referenceRuns[`${job.id}:location`] || {}
 
   return (
     <article className="package-card weekly-job-card">
@@ -508,12 +594,44 @@ function WeeklyJobCard({ job, packages, onPatch, onDelete, onCopy, onGenerateVid
       </label>
 
       <div className="weekly-reference-grid">
-        <ReferenceCell title="Avatar" name={refs.avatarPackage?.name || 'Missing'} items={refs.avatarImages} />
-        <ReferenceCell title="Product" name={refs.productPackage?.name || 'Missing'} items={refs.productImages} />
+        <ReferenceCell
+          title="Avatar"
+          name={refs.avatarPackage?.name || 'Missing'}
+          items={refs.avatarImages}
+          actionLabel={avatarRun.generating ? `Generating ${avatarRun.progress || 0}%` : refs.avatarImages.length ? 'Generate extra avatar' : 'Generate avatar in app'}
+          actionDisabled={!refs.avatarPackage || avatarRun.generating}
+          progress={avatarRun.generating ? avatarRun.progress : 0}
+          error={avatarRun.error}
+          onAction={() => onGenerateReference('avatar')}
+        />
+        <ReferenceCell
+          title="Product"
+          name={refs.productPackage?.name || 'Missing'}
+          items={refs.productImages}
+          actionLabel={productRun.generating ? `Generating ${productRun.progress || 0}%` : refs.productImages.length ? 'Generate extra product' : 'Generate product in app'}
+          actionDisabled={!refs.productPackage || productRun.generating}
+          progress={productRun.generating ? productRun.progress : 0}
+          error={productRun.error}
+          onAction={() => onGenerateReference('product')}
+        />
         <div className="weekly-reference-cell">
           <span>Location</span>
           <strong>{refs.location?.label || 'Missing'}</strong>
           <p>{refs.location?.description || 'Choose where the UGC ad should happen.'}</p>
+          {refs.locationImages.length > 0 && (
+            <div className="weekly-thumb-row single">
+              {refs.locationImages.slice(0, 1).map(item => (
+                <img key={item.id || item.url} src={item.url || item.dataUrl} alt={item.label || 'Location reference'} />
+              ))}
+            </div>
+          )}
+          <ReferenceAction
+            label={locationRun.generating ? `Generating ${locationRun.progress || 0}%` : refs.locationImages.length ? 'Regenerate location' : 'Generate location in app'}
+            disabled={!refs.location || locationRun.generating}
+            progress={locationRun.generating ? locationRun.progress : 0}
+            error={locationRun.error}
+            onAction={() => onGenerateReference('location')}
+          />
         </div>
       </div>
 
@@ -562,7 +680,7 @@ function WeeklyJobCard({ job, packages, onPatch, onDelete, onCopy, onGenerateVid
   )
 }
 
-function ReferenceCell({ title, name, items }) {
+function ReferenceCell({ title, name, items, actionLabel, actionDisabled, progress, error, onAction }) {
   return (
     <div className="weekly-reference-cell">
       <span>{title}</span>
@@ -574,6 +692,73 @@ function ReferenceCell({ title, name, items }) {
           ))}
         </div>
       ) : <p>No images saved yet.</p>}
+      <ReferenceAction
+        label={actionLabel}
+        disabled={actionDisabled}
+        progress={progress}
+        error={error}
+        onAction={onAction}
+      />
     </div>
   )
+}
+
+function ReferenceAction({ label, disabled, progress, error, onAction }) {
+  if (!label) return null
+  return (
+    <div className="weekly-reference-action">
+      <button className="secondary-btn compact" type="button" disabled={disabled} onClick={onAction}>{label}</button>
+      {progress > 0 && (
+        <div className="weekly-mini-progress" aria-label={`${label} progress`}>
+          <span style={{ width: `${Math.max(5, Math.min(100, progress))}%` }} />
+        </div>
+      )}
+      {error && <p className="weekly-reference-error">{error}</p>}
+    </div>
+  )
+}
+
+function buildWeeklyReferencePrompt({ job, refs, pack, kind }) {
+  if (kind === 'location') {
+    return [
+      `Weekly UGC job: ${job.title}`,
+      `Create one vertical location/environment reference for Seedance video generation.`,
+      `Location: ${refs.location?.label || 'selected location'}. ${refs.location?.description || ''}`,
+      `Video brief: ${job.videoBrief || 'Short vertical UGC ad.'}`,
+      'No people, no logos, no readable text, no watermark.',
+      'Make it realistic, clean, phone-video friendly, with enough background detail to guide the later video.',
+    ].filter(Boolean).join('\n')
+  }
+
+  const mode = referenceModeFor(kind, refs)
+  const extra = [
+    `Weekly UGC job: ${job.title}.`,
+    `Video type: ${refs.videoFormat?.label || 'UGC ad'}.`,
+    `Location context: ${refs.location?.label || 'studio'}.`,
+    `Video brief: ${job.videoBrief || 'Create a short vertical UGC ad.'}`,
+    'Generate a reusable reference image for later Seedance video generation inside this app.',
+  ].join(' ')
+
+  return buildPrompt({
+    pack,
+    mode,
+    style: kind === 'product' ? 'product' : 'realistic',
+    extra,
+  })
+}
+
+function referenceModeFor(kind, refs) {
+  if (kind === 'avatar') return refs.avatarImages.length ? 'full_body' : 'main_portrait'
+  if (kind === 'product') return refs.productImages.length ? 'lifestyle_shot' : 'packshot'
+  return 'location_reference'
+}
+
+function referenceLabelFor(kind, refs) {
+  if (kind === 'avatar') return refs.avatarImages.length ? 'extra avatar reference' : 'avatar reference'
+  if (kind === 'product') return refs.productImages.length ? 'extra product reference' : 'product reference'
+  return 'location reference'
+}
+
+function capitalize(value) {
+  return String(value || '').charAt(0).toUpperCase() + String(value || '').slice(1)
 }

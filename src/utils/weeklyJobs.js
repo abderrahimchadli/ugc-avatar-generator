@@ -91,16 +91,19 @@ export function getWeeklyJobReferences(job, packages = []) {
     videoFormat,
     avatarImages: imagesFromPackage(avatarPackage),
     productImages: imagesFromPackage(productPackage),
+    locationImages: imagesFromLocation(job),
   }
 }
 
 export function getWeeklyJobVideoReferences(job, packages = [], options = {}) {
   const avatarLimit = options.avatarLimit ?? 2
   const productLimit = options.productLimit ?? 2
+  const locationLimit = options.locationLimit ?? 1
   const refs = getWeeklyJobReferences(job, packages)
   const selected = [
     ...refs.avatarImages.slice(0, avatarLimit).map((item, index) => videoReferenceFromItem(item, refs.avatarPackage, 'avatar', index)),
     ...refs.productImages.slice(0, productLimit).map((item, index) => videoReferenceFromItem(item, refs.productPackage, 'product', index)),
+    ...refs.locationImages.slice(0, locationLimit).map((item, index) => videoReferenceFromItem(item, null, 'location', index)),
   ].filter(item => item.url)
 
   return selected.map((item, index) => ({
@@ -161,8 +164,9 @@ export function buildWeeklyJobSeedancePrompt(job, packages = []) {
   const locationLabel = refs.location?.label || 'selected UGC location'
   const avatarTags = videoRefs.filter(ref => ref.role === 'avatar').map(ref => ref.refTag).join(', ')
   const productTags = videoRefs.filter(ref => ref.role === 'product').map(ref => ref.refTag).join(', ')
+  const locationTags = videoRefs.filter(ref => ref.role === 'location').map(ref => ref.refTag).join(', ')
   const referenceLines = videoRefs.map(ref => (
-    `${ref.refTag} = ${ref.role === 'avatar' ? 'avatar identity' : 'product'} reference from "${ref.packageName}". Use only for that role.`
+    `${ref.refTag} = ${referenceRoleLabel(ref.role)} reference from "${ref.packageName}". Use only for that role.`
   ))
 
   return [
@@ -174,7 +178,7 @@ export function buildWeeklyJobSeedancePrompt(job, packages = []) {
     '',
     `Avatar: ${avatarTags || avatarName}. Keep ${avatarName}'s face, hair, body proportions, skin tone, and recognizable identity stable in every frame.`,
     `Product: ${productTags || productName}. Keep ${productName}'s shape, color, scale, label position, and materials stable in every frame.`,
-    `Location: ${locationLabel}. ${refs.location?.description || ''}`,
+    `Location: ${locationTags || locationLabel}. ${refs.location?.description || ''}`,
     '',
     `Brief: ${job.videoBrief || 'Create a short vertical UGC ad using the avatar, product, and location references.'}`,
     'Action: open on a clear hook, show the avatar naturally using or holding the product, include one close product detail, one authentic reaction, and finish with a direct CTA.',
@@ -227,6 +231,15 @@ function imagesFromPackage(pack) {
   return (pack.items || []).filter(item => item.url || item.dataUrl)
 }
 
+function imagesFromLocation(job) {
+  const items = Array.isArray(job.locationImages)
+    ? job.locationImages
+    : job.locationReference
+      ? [job.locationReference]
+      : []
+  return items.filter(item => item.url || item.dataUrl)
+}
+
 function videoReferenceFromItem(item, pack, role, index) {
   return {
     id: item.id || `${role}_${index}`,
@@ -234,8 +247,15 @@ function videoReferenceFromItem(item, pack, role, index) {
     label: item.label || `${pack?.name || role} reference ${index + 1}`,
     role,
     packageId: pack?.id || '',
-    packageName: pack?.name || role,
+    packageName: pack?.name || item.packageName || item.label || role,
   }
+}
+
+function referenceRoleLabel(role) {
+  if (role === 'avatar') return 'avatar identity'
+  if (role === 'product') return 'product'
+  if (role === 'location') return 'environment/location'
+  return role
 }
 
 function cleanText(value) {
