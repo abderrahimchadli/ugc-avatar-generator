@@ -11,14 +11,15 @@ export default function Home() {
     <main className="page-shell">
       <section className="hero-panel">
         <div>
-          <p className="eyebrow">Avatar and product reference studio</p>
-          <h1>Build named packages, generate in Flow or ChatGPT, then create Higgsfield assets.</h1>
+          <p className="eyebrow">Two-part creator workspace</p>
+          <h1>Use the original influencer studio or build extension-ready avatar and product packages.</h1>
           <p className="hero-copy">
-            Create reusable avatar and product packs with locked prompts, style sheets,
-            extension-assisted imports, and user-controlled Higgsfield Marketing Studio assets.
+            Keep Daan's Higgsfield-powered influencer workflow available in Studio, and use
+            the package bridge when you want Google Flow or ChatGPT images saved into named libraries.
           </p>
           <div className="hero-actions">
             <Link className="primary-btn" to={isApproved ? '/prompt-builder' : '/login'}>Start package</Link>
+            <Link className="secondary-btn" to="/studio">Open studio</Link>
             <Link className="secondary-btn" to="/library">Open library</Link>
           </div>
         </div>

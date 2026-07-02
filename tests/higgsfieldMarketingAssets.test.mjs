@@ -82,11 +82,11 @@ test('builds Marketing Studio avatar create candidates with avatars array', () =
     action: 'create',
     type: 'avatar',
     name: 'Camila',
-    avatars: ['up_avatar'],
+    avatars: [{ id: 'up_avatar', type: 'custom', image_url: 'https://cdn.example.com/avatar.png' }],
   })
 })
 
-test('keeps avatar object fallback with custom type and public URL', () => {
+test('keeps avatar upload id fallback after custom object candidates', () => {
   const candidates = buildMarketingAssetRequestCandidates(
     { type: 'avatar', name: 'Camila' },
     [{ id: 'up_avatar', publicUrl: 'https://cdn.example.com/avatar.png' }]
@@ -96,7 +96,14 @@ test('keeps avatar object fallback with custom type and public URL', () => {
     action: 'create',
     type: 'avatar',
     name: 'Camila',
-    avatars: [{ id: 'up_avatar', type: 'custom', image_url: 'https://cdn.example.com/avatar.png' }],
+    image: 'up_avatar',
+    image_url: 'https://cdn.example.com/avatar.png',
+  })
+  assert.deepEqual(candidates[4].args, {
+    action: 'create',
+    type: 'avatar',
+    name: 'Camila',
+    avatars: ['up_avatar'],
   })
 })
 
@@ -186,7 +193,11 @@ test('creates avatar assets through MCP without requiring a workspace id', async
       if (body.method === 'tools/call' && body.params.name === 'show_marketing_studio') {
         assert.equal(body.params.arguments.action, 'create')
         assert.equal(body.params.arguments.type, 'avatar')
-        assert.deepEqual(body.params.arguments.avatars, ['media_1'])
+        assert.deepEqual(body.params.arguments.avatars, [{
+          id: 'media_1',
+          type: 'custom',
+          image_url: 'https://cdn.example.com/media_1.png',
+        }])
         return {
           ok: true,
           status: 200,
@@ -214,7 +225,92 @@ test('creates avatar assets through MCP without requiring a workspace id', async
   })
 
   assert.equal(asset.id, 'avatar_1')
+  assert.equal(asset.media.uploadIds[0], 'media_1')
   assert.equal(calls.some(url => url.includes('/api/fnf')), false)
+})
+
+test('preserves uploaded media evidence when Marketing Studio creation fails', async () => {
+  installLocalStorage({
+    hf_access_token: 'token_1',
+  })
+  globalThis.fetch = async (url, options = {}) => {
+    const href = String(url)
+    if (href.startsWith('data:')) {
+      return {
+        ok: true,
+        blob: async () => new Blob(['image-bytes'], { type: 'image/png' }),
+      }
+    }
+    if (href.startsWith('https://upload.example.com')) {
+      return { ok: true, status: 200 }
+    }
+    if (href === '/api/hf/mcp') {
+      const body = JSON.parse(options.body)
+      if (body.method === 'initialize') {
+        return {
+          ok: true,
+          status: 200,
+          headers: { get: name => name.toLowerCase() === 'mcp-session-id' ? 'session_1' : 'application/json' },
+          text: async () => JSON.stringify({ jsonrpc: '2.0', id: body.id, result: {} }),
+        }
+      }
+      if (body.method === 'tools/call' && body.params.name === 'media_upload') {
+        return {
+          ok: true,
+          status: 200,
+          headers: { get: () => 'application/json' },
+          text: async () => JSON.stringify({
+            jsonrpc: '2.0',
+            id: body.id,
+            result: { content: [{ text: JSON.stringify({ media_id: 'media_1', upload_url: 'https://upload.example.com/file?X-Amz-Signature=abc' }) }] },
+          }),
+        }
+      }
+      if (body.method === 'tools/call' && body.params.name === 'media_confirm') {
+        return {
+          ok: true,
+          status: 200,
+          headers: { get: () => 'application/json' },
+          text: async () => JSON.stringify({
+            jsonrpc: '2.0',
+            id: body.id,
+            result: { content: [{ text: JSON.stringify({ id: 'media_1', url: 'https://cdn.example.com/media_1.png' }) }] },
+          }),
+        }
+      }
+      if (body.method === 'tools/call' && body.params.name === 'show_marketing_studio') {
+        return {
+          ok: true,
+          status: 200,
+          headers: { get: () => 'application/json' },
+          text: async () => JSON.stringify({
+            jsonrpc: '2.0',
+            id: body.id,
+            result: { isError: true, content: [{ text: 'Marketing Studio create failed' }] },
+          }),
+        }
+      }
+    }
+    return {
+      ok: false,
+      status: 404,
+      headers: { get: () => 'application/json' },
+      text: async () => 'unexpected request',
+    }
+  }
+
+  await assert.rejects(
+    createPackageMarketingAsset({
+      type: 'avatar',
+      name: 'Failed Asset',
+      items: [{ id: 'hero', mode: 'main_portrait', url: 'data:image/png;base64,abcd' }],
+    }),
+    error => {
+      assert.equal(error.higgsfieldMedia.uploadIds[0], 'media_1')
+      assert.equal(error.higgsfieldMedia.items[0].publicUrl, 'https://cdn.example.com/media_1.png')
+      return true
+    }
+  )
 })
 
 test('extracts nested Higgsfield asset ids', () => {

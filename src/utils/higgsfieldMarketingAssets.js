@@ -10,6 +10,7 @@ const MAX_PRODUCT_IMAGES = 8
 const MAX_AVATAR_IMAGES = 4
 
 export const HIGGSFIELD_ASSET_NOTE = 'Created as a Higgsfield Marketing Studio asset for reuse in Higgsfield ad and video workflows.'
+export const HIGGSFIELD_MEDIA_NOTE = 'Uploaded to Higgsfield media storage. This proves the image reached Higgsfield API storage, but it is not the same as a visible Marketing Studio asset.'
 
 function safeName(value, fallback = 'package') {
   const cleaned = String(value || fallback)
@@ -160,17 +161,32 @@ export function buildMarketingAssetRequestCandidates(pack, uploadsOrIds) {
       { tool: 'show_marketing_studio', args: { action: 'create', type: 'product', title: name, description, image: uploadIds } },
     ]
   }
-  const avatarObjects = uploads.map(upload => ({
+  const uploadsWithUrl = uploads.filter(upload => upload.publicUrl || upload.url)
+  const avatarObjects = uploadsWithUrl.map(upload => ({
     id: upload.id,
     type: 'custom',
-    ...(upload.publicUrl || upload.url ? { image_url: upload.publicUrl || upload.url } : {}),
+    image_url: upload.publicUrl || upload.url,
   }))
-  return [
+  const firstUploadWithUrl = uploadsWithUrl[0]
+  const candidates = []
+  if (avatarObjects.length) {
+    candidates.push(
+      { tool: 'show_marketing_studio', args: { action: 'create', type: 'avatar', name, avatars: avatarObjects } },
+      { tool: 'show_marketing_studio', args: { action: 'create', type: 'avatar', title: name, avatars: avatarObjects } },
+    )
+  }
+  if (firstUploadWithUrl) {
+    const imageUrl = firstUploadWithUrl.publicUrl || firstUploadWithUrl.url
+    candidates.push(
+      { tool: 'show_marketing_studio', args: { action: 'create', type: 'avatar', name, image: firstUploadWithUrl.id, image_url: imageUrl } },
+      { tool: 'show_marketing_studio', args: { action: 'create', type: 'avatar', title: name, image: firstUploadWithUrl.id, image_url: imageUrl } },
+    )
+  }
+  candidates.push(
     { tool: 'show_marketing_studio', args: { action: 'create', type: 'avatar', name, avatars: uploadIds } },
     { tool: 'show_marketing_studio', args: { action: 'create', type: 'avatar', title: name, avatars: uploadIds } },
-    { tool: 'show_marketing_studio', args: { action: 'create', type: 'avatar', name, avatars: avatarObjects } },
-    { tool: 'show_marketing_studio', args: { action: 'create', type: 'avatar', title: name, avatars: avatarObjects } },
-  ]
+  )
+  return candidates
 }
 
 function extractAssetId(value, seen = new WeakSet()) {
@@ -234,24 +250,45 @@ async function callFirstMarketingStudioCandidate(candidates) {
       return { data, id }
     } catch (error) {
       lastError = error
-      if (!/unknown tool|invalid|missing|required|requires|not found|validation|field|did not return/i.test(error.message || '')) throw error
+      if (!/unknown tool|invalid|missing|required|requires|not found|validation|field|did not return|create failed|request id/i.test(error.message || '')) throw error
     }
   }
   throw lastError || new Error('Higgsfield Marketing Studio asset request failed.')
+}
+
+function buildHiggsfieldMediaRecord(uploads, selectedItems) {
+  return {
+    label: 'Higgsfield media uploads',
+    type: 'higgsfield_media',
+    visibleInHiggsfieldAssets: false,
+    createdAt: Date.now(),
+    uploadIds: uploads.map(upload => upload.id),
+    itemIds: selectedItems.map(item => item.id),
+    items: uploads.map((upload, index) => ({
+      id: upload.id,
+      publicUrl: upload.publicUrl || '',
+      contentType: upload.contentType || '',
+      sizeBytes: upload.sizeBytes || 0,
+      sourceItemId: selectedItems[index]?.id || '',
+    })),
+    note: HIGGSFIELD_MEDIA_NOTE,
+  }
 }
 
 function normalizeCreatedAsset(pack, data, uploads, selectedItems) {
   const root = data?.data || data?.avatar || data?.product || data
   const id = extractAssetId(root) || extractAssetId(data)
   if (!id) throw new Error('Higgsfield created the asset but did not return an asset id.')
+  const media = buildHiggsfieldMediaRecord(uploads, selectedItems)
   return {
     id,
     type: pack.type === 'product' ? 'marketing_product' : 'marketing_avatar',
     label: pack.type === 'product' ? 'Marketing Studio product' : 'Marketing Studio avatar',
     visibleInHiggsfield: true,
     createdAt: Date.now(),
-    uploadIds: uploads.map(upload => upload.id),
-    itemIds: selectedItems.map(item => item.id),
+    uploadIds: media.uploadIds,
+    itemIds: media.itemIds,
+    media,
     note: HIGGSFIELD_ASSET_NOTE,
     raw: root,
   }
@@ -270,12 +307,19 @@ export async function createPackageMarketingAsset(pack, onProgress) {
     }))
   }
 
+  const higgsfieldMedia = buildHiggsfieldMediaRecord(uploads, selectedItems)
   onProgress?.({ phase: 'asset', index: uploads.length, total: uploads.length })
-  const { data } = await callFirstMarketingStudioCandidate(buildMarketingAssetRequestCandidates(pack, uploads))
-  return normalizeCreatedAsset(pack, data, uploads, selectedItems)
+  try {
+    const { data } = await callFirstMarketingStudioCandidate(buildMarketingAssetRequestCandidates(pack, uploads))
+    return normalizeCreatedAsset(pack, data, uploads, selectedItems)
+  } catch (error) {
+    error.higgsfieldMedia = higgsfieldMedia
+    throw error
+  }
 }
 
 export const __testing = {
+  buildHiggsfieldMediaRecord,
   extractAssetId,
   readableApiError,
   findPublicMediaUrl,

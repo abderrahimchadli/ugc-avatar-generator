@@ -11,6 +11,7 @@ export default function Nav() {
     { to: '/prompt-builder', label: 'Prompt' },
     { to: '/library', label: 'Library' },
     { to: '/extension', label: 'Extension' },
+    { to: '/studio', label: 'Studio' },
     ...(isSuperUser ? [{ to: '/users', label: 'Users' }] : []),
   ] : []
 

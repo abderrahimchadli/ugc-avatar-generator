@@ -3,7 +3,7 @@ import { useLocation } from 'react-router-dom'
 import {
   disconnectHF,
   isHFConnected,
-  startHiggsfieldOAuth,
+  startHiggsfieldOAuthPopup,
 } from '../utils/higgsfieldAuth'
 import { useAuth } from '../context/auth'
 import { usePackages } from '../context/packageStore'
@@ -29,13 +29,12 @@ export default function Settings() {
   async function connectHiggsfield() {
     setHfLoading(true)
     try {
-      localStorage.setItem('hf_return_url', '/settings?connected=1')
-      await startHiggsfieldOAuth()
+      await startHiggsfieldOAuthPopup()
+      setHfConnected(true)
     } catch (e) {
-      alert('Failed to connect Higgsfield: ' + e.message)
-      setHfLoading(false)
+      if (e.message !== 'cancelled') alert('Failed to connect Higgsfield: ' + e.message)
     } finally {
-      if (window.location.pathname === '/settings') setHfLoading(false)
+      setHfLoading(false)
     }
   }
 
@@ -63,11 +62,13 @@ export default function Settings() {
       const hasMarketingStudio = useful.some(tool => tool.name === 'show_marketing_studio')
       const hasMediaUpload = useful.some(tool => tool.name === 'media_upload')
       const hasMediaConfirm = useful.some(tool => tool.name === 'media_confirm')
+      const hasMediaList = useful.some(tool => tool.name === 'show_medias')
+      const hasUploadFlow = hasMediaUpload && hasMediaConfirm
       setApiDiagnostics({
-        ok: hasMarketingStudio && hasMediaUpload && hasMediaConfirm,
-        message: hasMarketingStudio && hasMediaUpload && hasMediaConfirm
-          ? 'API is ready for media upload, media confirmation, and Marketing Studio asset creation. No workspace ID is needed.'
-          : 'Higgsfield API connected, but required Marketing Studio asset tools were not found for this account.',
+        ok: hasUploadFlow && hasMarketingStudio,
+        message: hasUploadFlow && hasMarketingStudio
+          ? `API can upload confirmed media and attempt Marketing Studio asset creation. ${hasMediaList ? 'Media listing is also available for diagnostics.' : 'Media listing is not exposed on this account.'}`
+          : 'Higgsfield API connected, but this account is missing one or more tools needed for the Library asset flow.',
         tools: useful,
       })
     } catch (error) {

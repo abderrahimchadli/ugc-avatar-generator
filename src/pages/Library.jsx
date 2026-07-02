@@ -1,6 +1,7 @@
 import { isHFConnected } from '../utils/higgsfieldAuth'
 import {
   HIGGSFIELD_ASSET_NOTE,
+  HIGGSFIELD_MEDIA_NOTE,
   createPackageMarketingAsset,
   selectPackageImagesForMarketingAsset,
 } from '../utils/higgsfieldMarketingAssets'
@@ -56,10 +57,18 @@ export default function Library() {
       })
       updatePackage(pack.id, {
         higgsfieldAsset: asset,
+        higgsfieldMedia: asset.media,
       })
       setMessage(`Created ${asset.label} "${pack.name}" in Higgsfield Marketing Studio.`)
     } catch (e) {
-      setMessage(e.message)
+      if (e.higgsfieldMedia?.uploadIds?.length) {
+        updatePackage(pack.id, {
+          higgsfieldMedia: e.higgsfieldMedia,
+        })
+        setMessage(`Uploaded ${e.higgsfieldMedia.uploadIds.length} image${e.higgsfieldMedia.uploadIds.length === 1 ? '' : 's'} to Higgsfield media, but Marketing Studio asset creation failed: ${e.message}`)
+      } else {
+        setMessage(e.message)
+      }
     } finally {
       setUploading('')
     }
@@ -125,6 +134,12 @@ export default function Library() {
               <div className="asset-summary">
                 <strong>{pack.higgsfieldAsset.label || 'Higgsfield asset'}</strong>
                 <span>ID {String(pack.higgsfieldAsset.id).slice(0, 8)} · {HIGGSFIELD_ASSET_NOTE}</span>
+              </div>
+            )}
+            {pack.higgsfieldMedia?.uploadIds?.length && !pack.higgsfieldAsset?.id && (
+              <div className="asset-summary media-only">
+                <strong>{pack.higgsfieldMedia.label || 'Higgsfield media uploads'}</strong>
+                <span>{pack.higgsfieldMedia.uploadIds.length} confirmed · {HIGGSFIELD_MEDIA_NOTE}</span>
               </div>
             )}
             <div className="thumb-grid">

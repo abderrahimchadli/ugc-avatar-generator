@@ -619,6 +619,11 @@ textarea {
   border: 1px solid rgba(16, 185, 129, 0.22);
 }
 
+.asset-summary.media-only {
+  background: rgba(245, 158, 11, 0.1);
+  border-color: rgba(245, 158, 11, 0.26);
+}
+
 .asset-summary strong {
   color: var(--text-primary);
   font-size: 13px;
