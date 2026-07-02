@@ -67,12 +67,12 @@ Output only valid JSON. No explanation, no markdown.` },
     }),
   })
 
-  if (!res.ok) throw new Error(`Claude analysis failed (${res.status})`)
+  if (!res.ok) throw new Error(`Codex prompt analysis failed (${res.status})`)
   const data = await res.json()
   if (data.error) throw new Error(data.error.message)
 
   const text = data.content?.[0]?.text?.trim()
-  if (!text) throw new Error('Claude returned empty response')
+  if (!text) throw new Error('Codex returned empty response')
 
   // Try to extract JSON from anywhere in the response
   let json = null
@@ -85,8 +85,8 @@ Output only valid JSON. No explanation, no markdown.` },
     try { json = attempt(); break } catch {}
   }
 
-  if (!json) throw new Error('Claude response could not be parsed as JSON. Raw: ' + text.slice(0, 200))
-  if (!json.productDesc) throw new Error('Claude JSON missing productDesc field')
+  if (!json) throw new Error('Codex response could not be parsed as JSON. Raw: ' + text.slice(0, 200))
+  if (!json.productDesc) throw new Error('Codex JSON missing productDesc field')
 
   return buildCharSheetPrompt(brand, category, json.productDesc, json.angles || null)
 }

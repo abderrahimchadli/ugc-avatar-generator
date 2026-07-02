@@ -184,7 +184,7 @@ function DealCard({ deal, generating, progress, onDelete, onOpen, onRename, onGe
               animation: 'spin 0.75s linear infinite',
             }} />
             <div style={{ color: '#fff', fontSize: 12, fontWeight: 600 }}>
-              {progress < 10 ? 'Asking Claude…' : progress < 25 ? 'Uploading…' : 'Generating…'}
+              {progress < 10 ? 'Asking Codex…' : progress < 25 ? 'Uploading…' : 'Generating…'}
             </div>
             <div style={{ color: 'rgba(255,255,255,0.5)', fontSize: 11 }}>{Math.round(progress)}%</div>
           </div>

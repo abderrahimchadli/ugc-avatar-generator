@@ -335,8 +335,8 @@ function PropGeneratingSlot({ apiProgress, claudeStatus }) {
 
   const displayPct = Math.round(Math.max(smoothPct, apiProgress || 0))
   const elapsedLabel = elapsed < 60 ? `${elapsed}s` : `${Math.floor(elapsed / 60)}m ${elapsed % 60}s`
-  const statusLabel = claudeStatus === 'analyzing' ? 'Asking Claude…'
-    : claudeStatus === 'done' ? '✓ Claude analyzed'
+  const statusLabel = claudeStatus === 'analyzing' ? 'Asking Codex…'
+    : claudeStatus === 'done' ? '✓ Codex analyzed'
     : displayPct < 15 ? 'Starting…' : 'Generating…'
 
   return (

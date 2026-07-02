@@ -2119,7 +2119,7 @@ function BrandDealCard({ deal, editingBrand, editBrand, onEditBrand, onStartEdit
   },[generating])
 
   function genLabel(pct){
-    if(pct<8) return 'Asking Claude…'
+    if(pct<8) return 'Asking Codex…'
     if(pct<20) return 'Uploading…'
     if(pct<75) return 'Generating…'
     return 'Almost done…'
@@ -2206,7 +2206,7 @@ function BrandDealCard({ deal, editingBrand, editBrand, onEditBrand, onStartEdit
             background: claudeStatus==='done' ? 'rgba(52,199,89,0.85)' : claudeStatus==='analyzing' ? 'rgba(139,92,246,0.85)' : 'rgba(255,59,48,0.85)',
             color:'#fff',maxWidth:'90%',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',
           }}>
-            {claudeStatus==='done' ? '✓ Claude analyzed' : claudeStatus==='analyzing' ? 'Claude analyzing…' : '✗ '+claudeStatus.replace('error:','')}
+            {claudeStatus==='done' ? '✓ Codex analyzed' : claudeStatus==='analyzing' ? 'Codex analyzing…' : '✗ '+claudeStatus.replace('error:','')}
           </div>
         )}
         <input ref={fileRef} type="file" accept="image/*" multiple style={{display:'none'}}
@@ -2454,7 +2454,7 @@ function BrandDealSection({ deals=[], onChange }) {
         setClaudeStatus(s=>({...s,[deal.id]:'done'}))
         setTimeout(()=>setClaudeStatus(s=>({...s,[deal.id]:null})),3000)
       } catch(e) {
-        alert('Claude: ' + e.message)
+        alert('Codex: ' + e.message)
         setClaudeStatus(s=>({...s,[deal.id]:'error:'+e.message}))
         setTimeout(()=>setClaudeStatus(s=>({...s,[deal.id]:null})),5000)
       }
