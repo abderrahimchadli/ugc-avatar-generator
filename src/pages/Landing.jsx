@@ -201,24 +201,48 @@ export default function Landing() {
         </div>
 
         <p style={{ fontSize:20, color:'rgba(255,255,255,0.38)', lineHeight:1.65, margin:'0 auto 52px', maxWidth:420, fontWeight:400, letterSpacing:'-0.1px' }}>
-          Build, manage, and grow your AI influencers.
+          Build influencers, product references, and weekly UGC ad jobs.
         </p>
 
-        <button
-          onClick={() => navigate('/create')}
-          style={{
-            padding:'17px 60px', borderRadius:980,
-            background:'linear-gradient(135deg, #EC4899 0%, #8B5CF6 100%)',
-            color:'#fff', fontSize:17, fontWeight:700, letterSpacing:'-0.2px',
-            boxShadow:'0 0 32px rgba(168,85,247,0.45), 0 4px 20px rgba(0,0,0,0.5)',
-            transition:'transform 0.18s, box-shadow 0.18s',
-            border: 'none', cursor: 'pointer',
-          }}
-          onMouseEnter={e => { e.currentTarget.style.transform='scale(1.04) translateY(-2px)'; e.currentTarget.style.boxShadow='0 0 60px rgba(168,85,247,0.65), 0 8px 32px rgba(0,0,0,0.5)' }}
-          onMouseLeave={e => { e.currentTarget.style.transform='scale(1) translateY(0)'; e.currentTarget.style.boxShadow='0 0 32px rgba(168,85,247,0.45), 0 4px 20px rgba(0,0,0,0.5)' }}
-        >
-          Get Started →
-        </button>
+        <div style={{ display:'flex', flexWrap:'wrap', justifyContent:'center', gap:12 }}>
+          <button
+            onClick={() => navigate('/create')}
+            style={{
+              padding:'17px 42px', borderRadius:980,
+              background:'linear-gradient(135deg, #EC4899 0%, #8B5CF6 100%)',
+              color:'#fff', fontSize:17, fontWeight:700, letterSpacing:'-0.2px',
+              boxShadow:'0 0 32px rgba(168,85,247,0.45), 0 4px 20px rgba(0,0,0,0.5)',
+              transition:'transform 0.18s, box-shadow 0.18s',
+              border: 'none', cursor: 'pointer',
+            }}
+            onMouseEnter={e => { e.currentTarget.style.transform='scale(1.04) translateY(-2px)'; e.currentTarget.style.boxShadow='0 0 60px rgba(168,85,247,0.65), 0 8px 32px rgba(0,0,0,0.5)' }}
+            onMouseLeave={e => { e.currentTarget.style.transform='scale(1) translateY(0)'; e.currentTarget.style.boxShadow='0 0 32px rgba(168,85,247,0.45), 0 4px 20px rgba(0,0,0,0.5)' }}
+          >
+            Create Influencer
+          </button>
+          <button
+            onClick={() => navigate('/products')}
+            style={{
+              padding:'17px 28px', borderRadius:980,
+              background:'rgba(255,255,255,0.08)',
+              color:'#fff', fontSize:16, fontWeight:700, letterSpacing:'-0.2px',
+              border:'1px solid rgba(255,255,255,0.14)', cursor:'pointer',
+            }}
+          >
+            Product Images
+          </button>
+          <button
+            onClick={() => navigate('/weekly-jobs')}
+            style={{
+              padding:'17px 28px', borderRadius:980,
+              background:'rgba(255,255,255,0.08)',
+              color:'#fff', fontSize:16, fontWeight:700, letterSpacing:'-0.2px',
+              border:'1px solid rgba(255,255,255,0.14)', cursor:'pointer',
+            }}
+          >
+            Week Jobs
+          </button>
+        </div>
       </div>
 
       <style>{`

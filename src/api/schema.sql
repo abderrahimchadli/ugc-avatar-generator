@@ -31,13 +31,32 @@ create table if not exists package_items (
   created_at timestamptz not null default now()
 );
 
+create table if not exists weekly_jobs (
+  id text primary key,
+  owner_id uuid references auth.users(id) on delete cascade,
+  title text not null,
+  week_start date not null,
+  status text not null default 'draft',
+  avatar_package_id text references packages(id) on delete set null,
+  product_package_id text references packages(id) on delete set null,
+  location_id text not null default 'studio',
+  video_format text not null default 'ugc-ad',
+  video_brief text not null default '',
+  notes text not null default '',
+  metadata jsonb not null default '{}'::jsonb,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
 alter table profiles enable row level security;
 alter table packages enable row level security;
 alter table package_items enable row level security;
+alter table weekly_jobs enable row level security;
 
 create policy "profiles read self" on profiles for select using (auth.uid() = id);
 create policy "packages owner all" on packages for all using (auth.uid() = owner_id) with check (auth.uid() = owner_id);
 create policy "items owner all" on package_items for all using (auth.uid() = owner_id) with check (auth.uid() = owner_id);
+create policy "weekly jobs owner all" on weekly_jobs for all using (auth.uid() = owner_id) with check (auth.uid() = owner_id);
 
 create or replace function public.handle_new_user()
 returns trigger as $$

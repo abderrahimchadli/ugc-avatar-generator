@@ -721,6 +721,231 @@ textarea {
   gap: 8px;
 }
 
+.weekly-page {
+  max-width: 1280px;
+}
+
+.weekly-overview {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 14px;
+  margin-bottom: 18px;
+}
+
+.weekly-sync {
+  margin: -4px 0 16px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  color: var(--text-secondary);
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-subtle);
+  font-size: 13px;
+}
+
+.weekly-sync.synced {
+  color: #047857;
+  background: rgba(16, 185, 129, 0.1);
+  border-color: rgba(16, 185, 129, 0.18);
+}
+
+.weekly-sync.error {
+  color: #B45309;
+  background: rgba(245, 158, 11, 0.12);
+  border-color: rgba(245, 158, 11, 0.2);
+}
+
+.weekly-overview-card {
+  display: grid;
+  gap: 6px;
+}
+
+.weekly-overview-card span,
+.weekly-reference-cell span,
+.weekly-group-head span {
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0;
+}
+
+.weekly-overview-card strong {
+  font-size: 32px;
+}
+
+.weekly-overview-card p,
+.weekly-reference-cell p {
+  color: var(--text-secondary);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.weekly-layout {
+  display: grid;
+  grid-template-columns: minmax(360px, 0.95fr) minmax(280px, 0.55fr);
+  gap: 18px;
+  align-items: start;
+}
+
+.weekly-job-form {
+  display: grid;
+  gap: 16px;
+}
+
+.weekly-job-form h2,
+.weekly-jobs-section h2 {
+  font-size: 24px;
+  margin: 4px 0;
+}
+
+.weekly-form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.weekly-side-panel {
+  display: grid;
+  gap: 14px;
+}
+
+.weekly-action-list {
+  display: grid;
+  gap: 8px;
+}
+
+.weekly-action-list a,
+.weekly-missing-note a {
+  display: block;
+  padding: 10px 12px;
+  border-radius: 8px;
+  color: var(--text-primary);
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-subtle);
+  font-size: 14px;
+  font-weight: 750;
+}
+
+.weekly-missing-note {
+  display: grid;
+  gap: 8px;
+}
+
+.weekly-jobs-section {
+  margin-top: 24px;
+}
+
+.compact-head {
+  align-items: center;
+  margin-bottom: 10px;
+}
+
+.compact-head h2 {
+  margin: 4px 0 0;
+}
+
+.weekly-group {
+  display: grid;
+  gap: 10px;
+  margin-bottom: 20px;
+}
+
+.weekly-group-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 0 2px;
+}
+
+.weekly-group-head strong {
+  font-size: 16px;
+}
+
+.weekly-job-card {
+  display: grid;
+  gap: 14px;
+}
+
+.weekly-job-card h2 {
+  margin-top: 12px;
+}
+
+.weekly-status-select {
+  max-width: 220px;
+}
+
+.weekly-reference-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.weekly-reference-cell {
+  min-width: 0;
+  display: grid;
+  align-content: start;
+  gap: 7px;
+  padding: 12px;
+  border-radius: 10px;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-subtle);
+}
+
+.weekly-reference-cell strong {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.weekly-thumb-row {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.weekly-thumb-row img {
+  width: 100%;
+  aspect-ratio: 1;
+  object-fit: cover;
+  border-radius: 7px;
+  background: var(--bg);
+}
+
+.weekly-checklist {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+
+.weekly-checklist span {
+  padding: 6px 8px;
+  border-radius: 8px;
+  color: #B45309;
+  background: rgba(245, 158, 11, 0.14);
+  border: 1px solid rgba(245, 158, 11, 0.18);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.weekly-checklist span.done {
+  color: #047857;
+  background: rgba(16, 185, 129, 0.12);
+  border-color: rgba(16, 185, 129, 0.18);
+}
+
+.weekly-brief {
+  color: var(--text-primary);
+  line-height: 1.5;
+  font-size: 14px;
+}
+
+.weekly-prompt-textarea {
+  min-height: 210px;
+  font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}
+
 .settings-row,
 .user-row {
   display: flex;
@@ -791,6 +1016,12 @@ textarea {
     width: 100%;
   }
   .diagnostic-grid {
+    grid-template-columns: 1fr;
+  }
+  .weekly-overview,
+  .weekly-layout,
+  .weekly-form-grid,
+  .weekly-reference-grid {
     grid-template-columns: 1fr;
   }
   .nav-links { display: none; }

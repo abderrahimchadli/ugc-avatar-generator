@@ -25,6 +25,7 @@ const Influencers = lazy(() => import('./pages/Influencers'))
 const Inspiration = lazy(() => import('./pages/Inspiration'))
 const BrandDeals = lazy(() => import('./pages/BrandDeals'))
 const Create = lazy(() => import('./pages/Create'))
+const WeeklyJobs = lazy(() => import('./pages/WeeklyJobs'))
 
 function PageFallback() {
   return <main className="page-shell"><section className="panel"><h1>Loading…</h1></section></main>
@@ -65,6 +66,7 @@ function AppRoutes() {
         <Route path="/users" element={<RequireApproved><AdminUsers /></RequireApproved>} />
         <Route path="/settings" element={<Settings />} />
         <Route path="/extension-import" element={<RequireApproved><ExtensionImport /></RequireApproved>} />
+        <Route path="/weekly-jobs" element={<RequireApprovedLazy><WeeklyJobs /></RequireApprovedLazy>} />
         <Route path="/studio" element={<RequireApprovedLazy><Landing /></RequireApprovedLazy>} />
         <Route path="/influencers" element={<RequireApprovedLazy><Influencers /></RequireApprovedLazy>} />
         <Route path="/inspiration" element={<RequireApprovedLazy><Inspiration /></RequireApprovedLazy>} />

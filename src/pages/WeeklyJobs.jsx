@@ -1,0 +1,473 @@
+import { useEffect, useMemo, useState } from 'react'
+import { Link } from 'react-router-dom'
+import { useAuth } from '../context/auth'
+import { usePackages } from '../context/packageStore'
+import { useBrandDeals, useInfluencers } from '../store'
+import { hasSupabaseConfig } from '../lib/supabaseClient'
+import {
+  deleteServerWeeklyJob,
+  loadServerWeeklyJobs,
+  saveServerWeeklyJob,
+} from '../utils/serverWeeklyJobs'
+import {
+  WEEKLY_VIDEO_FORMATS,
+  buildWeeklyJobVideoPrompt,
+  createWeeklyJob,
+  getWeeklyJobChecklist,
+  getWeeklyJobReferences,
+  getWeeklyLocations,
+  groupWeeklyJobsByWeek,
+  isWeeklyJobReady,
+  mergeWeeklyJobLists,
+  startOfISOWeek,
+  storageKeyForWeeklyJobs,
+  updateWeeklyJob,
+} from '../utils/weeklyJobs'
+
+const STATUS_OPTIONS = [
+  { id: 'draft', label: 'Draft' },
+  { id: 'references-ready', label: 'References ready' },
+  { id: 'video-ready', label: 'Video ready' },
+  { id: 'published', label: 'Published' },
+]
+
+function readJobs(key) {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(key) || '[]')
+    return Array.isArray(parsed) ? parsed : []
+  } catch {
+    return []
+  }
+}
+
+function writeJobs(key, value) {
+  try {
+    localStorage.setItem(key, JSON.stringify(value))
+  } catch (error) {
+    console.warn('Weekly jobs storage failed', error)
+  }
+}
+
+export default function WeeklyJobs() {
+  const { profile } = useAuth()
+  const { packages } = usePackages()
+  const influencerStore = useInfluencers() || [[], () => {}]
+  const brandDealStore = useBrandDeals() || [[], () => {}]
+  const [influencers] = influencerStore
+  const [brandDeals] = brandDealStore
+  const storageKey = storageKeyForWeeklyJobs(profile)
+  const avatarPackages = useMemo(() => packages.filter(pack => pack.type === 'avatar'), [packages])
+  const productPackages = useMemo(() => packages.filter(pack => pack.type === 'product'), [packages])
+  const locations = useMemo(() => getWeeklyLocations(), [])
+  const [jobs, setJobs] = useState([])
+  const [notice, setNotice] = useState('')
+  const [serverStatus, setServerStatus] = useState(() => ({
+    mode: hasSupabaseConfig ? 'server' : 'local',
+    sync: hasSupabaseConfig ? 'idle' : 'local-only',
+    message: hasSupabaseConfig ? 'Weekly jobs will sync to Supabase when the weekly_jobs table exists.' : 'Demo mode saves weekly jobs in this browser.',
+  }))
+  const [form, setForm] = useState(() => ({
+    weekStart: startOfISOWeek(),
+    title: '',
+    avatarPackageId: '',
+    productPackageId: '',
+    locationId: 'studio',
+    videoFormat: 'ugc-ad',
+    videoBrief: '',
+    notes: '',
+  }))
+
+  useEffect(() => {
+    let cancelled = false
+    const cachedJobs = readJobs(storageKey)
+    setJobs(cachedJobs)
+
+    async function loadJobs() {
+      if (!hasSupabaseConfig || !profile?.id) {
+        setServerStatus({
+          mode: 'local',
+          sync: 'local-only',
+          message: 'Demo mode saves weekly jobs in this browser.',
+        })
+        return
+      }
+
+      setServerStatus({
+        mode: 'server',
+        sync: 'loading',
+        message: 'Loading weekly jobs from server...',
+      })
+      const result = await loadServerWeeklyJobs(profile)
+      if (cancelled) return
+      if (result.error) {
+        setServerStatus({
+          mode: 'server',
+          sync: 'error',
+          message: result.error.message || 'Weekly jobs table is not ready yet. Local account cache is still active.',
+        })
+        return
+      }
+
+      const mergedJobs = mergeWeeklyJobLists(result.jobs || [], cachedJobs)
+      setJobs(mergedJobs)
+      writeJobs(storageKey, mergedJobs)
+      setServerStatus({
+        mode: 'server',
+        sync: 'synced',
+        message: 'Weekly jobs synced.',
+      })
+
+      const serverIds = new Set((result.jobs || []).map(job => job.id))
+      const missingOnServer = mergedJobs.filter(job => !serverIds.has(job.id))
+      if (missingOnServer.length) {
+        Promise.allSettled(missingOnServer.map(job => saveServerWeeklyJob(profile, job))).then(results => {
+          if (cancelled) return
+          const failed = results.find(item => item.status === 'fulfilled' && item.value?.error)
+            || results.find(item => item.status === 'rejected')
+          if (failed) {
+            setServerStatus({
+              mode: 'server',
+              sync: 'error',
+              message: 'Some weekly jobs could not sync to server yet. They remain saved in this account browser cache.',
+            })
+          }
+        })
+      }
+    }
+
+    loadJobs()
+    return () => {
+      cancelled = true
+    }
+  }, [profile?.id, storageKey])
+
+  useEffect(() => {
+    setForm(current => ({
+      ...current,
+      avatarPackageId: current.avatarPackageId || avatarPackages[0]?.id || '',
+      productPackageId: current.productPackageId || productPackages[0]?.id || '',
+    }))
+  }, [avatarPackages[0]?.id, productPackages[0]?.id])
+
+  const groupedJobs = useMemo(() => groupWeeklyJobsByWeek(jobs), [jobs])
+  const readyJobs = useMemo(() => jobs.filter(job => isWeeklyJobReady(job, packages)).length, [jobs, packages])
+
+  function persist(nextJobs, message, serverOperation) {
+    setJobs(nextJobs)
+    writeJobs(storageKey, nextJobs)
+    if (serverOperation && hasSupabaseConfig && profile?.id) persistServer(serverOperation)
+    if (message) {
+      setNotice(message)
+      window.setTimeout(() => setNotice(''), 3000)
+    }
+  }
+
+  function updateForm(field, value) {
+    setForm(current => ({ ...current, [field]: value }))
+  }
+
+  function createJob(event) {
+    event.preventDefault()
+    const job = createWeeklyJob(form)
+    persist([job, ...jobs], 'Weekly UGC job created.', () => saveServerWeeklyJob(profile, job))
+    setForm(current => ({ ...current, title: '', videoBrief: '', notes: '' }))
+  }
+
+  function patchJob(jobId, patch) {
+    let updatedJob = null
+    const nextJobs = jobs.map(job => {
+      if (job.id !== jobId) return job
+      updatedJob = updateWeeklyJob(job, patch)
+      return updatedJob
+    })
+    persist(nextJobs, 'Weekly job updated.', () => saveServerWeeklyJob(profile, updatedJob))
+  }
+
+  function deleteJob(jobId) {
+    persist(jobs.filter(job => job.id !== jobId), 'Weekly job removed.', () => deleteServerWeeklyJob(jobId))
+  }
+
+  function persistServer(operation) {
+    setServerStatus({
+      mode: 'server',
+      sync: 'saving',
+      message: 'Saving weekly job to server...',
+    })
+    operation().then(result => {
+      if (result?.error) {
+        setServerStatus({
+          mode: 'server',
+          sync: 'error',
+          message: result.error.message || 'Server save failed. Local account cache is still active.',
+        })
+      } else {
+        setServerStatus({
+          mode: 'server',
+          sync: 'synced',
+          message: 'Weekly jobs synced.',
+        })
+      }
+    }).catch(error => {
+      setServerStatus({
+        mode: 'server',
+        sync: 'error',
+        message: error.message || 'Server save failed. Local account cache is still active.',
+      })
+    })
+  }
+
+  async function copyPrompt(job) {
+    const prompt = buildWeeklyJobVideoPrompt(job, packages)
+    try {
+      await navigator.clipboard.writeText(prompt)
+      setNotice('Video prompt copied.')
+    } catch {
+      setNotice('Copy failed. Select the prompt text manually.')
+    }
+  }
+
+  return (
+    <main className="page-shell weekly-page">
+      <div className="page-head">
+        <div>
+          <p className="eyebrow">Studio production planner</p>
+          <h1>Weekly UGC Jobs</h1>
+          <p className="muted">Group avatar, product, location, and video references by week before creating UGC ads.</p>
+        </div>
+        <div className="row-actions">
+          <Link className="secondary-btn" to="/avatars">Avatars</Link>
+          <Link className="secondary-btn" to="/products">Products</Link>
+          <Link className="primary-btn" to="/prompt-builder">Build prompts</Link>
+        </div>
+      </div>
+
+      {notice && <div className="notice">{notice}</div>}
+      <div className={`weekly-sync ${serverStatus.sync}`}>
+        {serverStatus.message}
+      </div>
+
+      <section className="weekly-overview">
+        <div className="panel weekly-overview-card">
+          <span>Avatar packages</span>
+          <strong>{avatarPackages.length}</strong>
+          <p>Create or reuse identity-locked influencer references.</p>
+        </div>
+        <div className="panel weekly-overview-card">
+          <span>Product packages</span>
+          <strong>{productPackages.length}</strong>
+          <p>Create packshots, details, lifestyle images, and product sheets.</p>
+        </div>
+        <div className="panel weekly-overview-card">
+          <span>Studio assets</span>
+          <strong>{influencers.length + brandDeals.length}</strong>
+          <p>Original influencers and brand deals are still available in Studio.</p>
+        </div>
+        <div className="panel weekly-overview-card">
+          <span>Ready jobs</span>
+          <strong>{readyJobs}/{jobs.length}</strong>
+          <p>Ready means avatar, product, location, images, and video brief exist.</p>
+        </div>
+      </section>
+
+      <section className="weekly-layout">
+        <form className="panel weekly-job-form" onSubmit={createJob}>
+          <div>
+            <p className="eyebrow">Create week job</p>
+            <h2>Plan one UGC ad package</h2>
+            <p className="muted">Use this to prepare the references needed before making a video.</p>
+          </div>
+
+          <div className="weekly-form-grid">
+            <label>
+              Week starts
+              <input type="date" value={form.weekStart} onChange={event => updateForm('weekStart', event.target.value)} />
+            </label>
+            <label>
+              Job title
+              <input value={form.title} onChange={event => updateForm('title', event.target.value)} placeholder="Example: Serum launch week" />
+            </label>
+            <label>
+              Avatar
+              <select value={form.avatarPackageId} onChange={event => updateForm('avatarPackageId', event.target.value)}>
+                <option value="">Select avatar package</option>
+                {avatarPackages.map(pack => <option key={pack.id} value={pack.id}>{pack.name}</option>)}
+              </select>
+            </label>
+            <label>
+              Product
+              <select value={form.productPackageId} onChange={event => updateForm('productPackageId', event.target.value)}>
+                <option value="">Select product package</option>
+                {productPackages.map(pack => <option key={pack.id} value={pack.id}>{pack.name}</option>)}
+              </select>
+            </label>
+            <label>
+              Location
+              <select value={form.locationId} onChange={event => updateForm('locationId', event.target.value)}>
+                {locations.map(location => <option key={location.id} value={location.id}>{location.label}</option>)}
+              </select>
+            </label>
+            <label>
+              Video type
+              <select value={form.videoFormat} onChange={event => updateForm('videoFormat', event.target.value)}>
+                {WEEKLY_VIDEO_FORMATS.map(format => <option key={format.id} value={format.id}>{format.label}</option>)}
+              </select>
+            </label>
+          </div>
+
+          <label>
+            Video brief
+            <textarea
+              value={form.videoBrief}
+              onChange={event => updateForm('videoBrief', event.target.value)}
+              placeholder="Example: Morning bathroom mirror routine. Avatar applies the product, shows texture closeup, then gives one honest reason to buy."
+            />
+          </label>
+
+          <label>
+            Notes
+            <textarea
+              value={form.notes}
+              onChange={event => updateForm('notes', event.target.value)}
+              placeholder="Offer, CTA, script line, angle, or what still needs to be generated."
+            />
+          </label>
+
+          <button className="primary-btn full" type="submit">Create weekly job</button>
+          <div className="weekly-missing-note">
+            {!avatarPackages.length && <Link to="/avatars">Create an avatar package first</Link>}
+            {!productPackages.length && <Link to="/products">Create a product package first</Link>}
+          </div>
+        </form>
+
+        <section className="weekly-side-panel">
+          <div className="panel">
+            <p className="eyebrow">What this adds</p>
+            <ul className="steps-list">
+              <li><strong>Weekly grouping:</strong> keep each ad job under a clear week.</li>
+              <li><strong>Reference pack:</strong> avatar images, product images, and location are checked together.</li>
+              <li><strong>Video prompt:</strong> one copy-ready prompt is built from the selected references.</li>
+              <li><strong>Existing tools:</strong> Studio, packages, library, extension, and Higgsfield stay separate but organized.</li>
+            </ul>
+          </div>
+          <div className="panel">
+            <p className="eyebrow">Fast actions</p>
+            <div className="weekly-action-list">
+              <Link to="/avatars">Create influencer avatar</Link>
+              <Link to="/products">Create product images</Link>
+              <Link to="/prompt-builder">Generate image prompts</Link>
+              <Link to="/influencers">Open original Studio</Link>
+              <Link to="/library">Check saved references</Link>
+            </div>
+          </div>
+        </section>
+      </section>
+
+      <section className="weekly-jobs-section">
+        <div className="page-head compact-head">
+          <div>
+            <p className="eyebrow">Grouped by week</p>
+            <h2>Production board</h2>
+          </div>
+        </div>
+
+        {groupedJobs.length === 0 ? (
+          <div className="panel empty-library">
+            <h2>No weekly jobs yet</h2>
+            <p className="muted">Create the first week job to group the avatar, product, location, and video brief in one place.</p>
+          </div>
+        ) : groupedJobs.map(group => (
+          <div className="weekly-group" key={group.weekStart}>
+            <div className="weekly-group-head">
+              <strong>{group.label}</strong>
+              <span>{group.jobs.length} job{group.jobs.length === 1 ? '' : 's'}</span>
+            </div>
+            <div className="card-grid">
+              {group.jobs.map(job => (
+                <WeeklyJobCard
+                  key={job.id}
+                  job={job}
+                  packages={packages}
+                  onPatch={patch => patchJob(job.id, patch)}
+                  onDelete={() => deleteJob(job.id)}
+                  onCopy={() => copyPrompt(job)}
+                />
+              ))}
+            </div>
+          </div>
+        ))}
+      </section>
+    </main>
+  )
+}
+
+function WeeklyJobCard({ job, packages, onPatch, onDelete, onCopy }) {
+  const refs = getWeeklyJobReferences(job, packages)
+  const checklist = getWeeklyJobChecklist(job, packages)
+  const ready = checklist.every(item => item.done)
+  const prompt = buildWeeklyJobVideoPrompt(job, packages)
+
+  return (
+    <article className="package-card weekly-job-card">
+      <div className="card-top">
+        <div>
+          <span className={ready ? 'status-ok' : 'status-wait'}>{ready ? 'Ready for video' : 'Needs references'}</span>
+          <h2>{job.title}</h2>
+          <p className="muted">{refs.videoFormat.label} in {refs.location?.label || 'no location'}</p>
+        </div>
+        <button className="danger-btn compact" onClick={onDelete} type="button">Delete</button>
+      </div>
+
+      <label className="weekly-status-select">
+        Status
+        <select value={job.status} onChange={event => onPatch({ status: event.target.value })}>
+          {STATUS_OPTIONS.map(status => <option key={status.id} value={status.id}>{status.label}</option>)}
+        </select>
+      </label>
+
+      <div className="weekly-reference-grid">
+        <ReferenceCell title="Avatar" name={refs.avatarPackage?.name || 'Missing'} items={refs.avatarImages} />
+        <ReferenceCell title="Product" name={refs.productPackage?.name || 'Missing'} items={refs.productImages} />
+        <div className="weekly-reference-cell">
+          <span>Location</span>
+          <strong>{refs.location?.label || 'Missing'}</strong>
+          <p>{refs.location?.description || 'Choose where the UGC ad should happen.'}</p>
+        </div>
+      </div>
+
+      <div className="weekly-checklist">
+        {checklist.map(item => (
+          <span key={item.id} className={item.done ? 'done' : ''}>{item.done ? 'OK' : 'Need'} {item.label}</span>
+        ))}
+      </div>
+
+      {job.videoBrief && <p className="weekly-brief">{job.videoBrief}</p>}
+      {job.notes && <p className="muted">{job.notes}</p>}
+
+      <label>
+        Video reference prompt
+        <textarea className="weekly-prompt-textarea" readOnly value={prompt} />
+      </label>
+
+      <div className="row-actions">
+        <button className="secondary-btn" onClick={onCopy} type="button">Copy video prompt</button>
+        <Link className="secondary-btn" to="/library">Open library</Link>
+      </div>
+    </article>
+  )
+}
+
+function ReferenceCell({ title, name, items }) {
+  return (
+    <div className="weekly-reference-cell">
+      <span>{title}</span>
+      <strong>{name}</strong>
+      {items.length ? (
+        <div className="weekly-thumb-row">
+          {items.slice(0, 4).map(item => (
+            <img key={item.id} src={item.url || item.dataUrl} alt={item.label || title} />
+          ))}
+        </div>
+      ) : <p>No images saved yet.</p>}
+    </div>
+  )
+}

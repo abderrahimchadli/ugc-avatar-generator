@@ -12,13 +12,14 @@ export default function Home() {
       <section className="hero-panel">
         <div>
           <p className="eyebrow">Two-part creator workspace</p>
-          <h1>Use the original influencer studio or build extension-ready avatar and product packages.</h1>
+          <h1>Plan weekly UGC ads from avatars, products, locations, and saved references.</h1>
           <p className="hero-copy">
-            Keep Daan's Higgsfield-powered influencer workflow available in Studio, and use
-            the package bridge when you want Google Flow or ChatGPT images saved into named libraries.
+            Keep Daan's Higgsfield-powered influencer workflow available in Studio, use the package bridge
+            for Google Flow or ChatGPT images, then group each week's avatar, product, location, and video brief.
           </p>
           <div className="hero-actions">
-            <Link className="primary-btn" to={isApproved ? '/prompt-builder' : '/login'}>Start package</Link>
+            <Link className="primary-btn" to="/weekly-jobs">Plan week job</Link>
+            <Link className="secondary-btn" to={isApproved ? '/prompt-builder' : '/login'}>Start package</Link>
             <Link className="secondary-btn" to="/studio">Open studio</Link>
             <Link className="secondary-btn" to="/library">Open library</Link>
           </div>

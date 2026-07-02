@@ -12,6 +12,7 @@ export default function Nav() {
     { to: '/library', label: 'Library' },
     { to: '/extension', label: 'Extension' },
     { to: '/studio', label: 'Studio' },
+    { to: '/weekly-jobs', label: 'Week Jobs' },
     ...(isSuperUser ? [{ to: '/users', label: 'Users' }] : []),
   ] : []
 
